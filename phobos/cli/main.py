@@ -7,7 +7,7 @@ import sys
 
 from phobos.core.config import ScanConfig
 from phobos.core.models import Asset, AssetType
-from phobos.core.request_manager import RequestManager, RequestError
+from phobos.core.request_manager import RequestError, RequestManager
 from phobos.core.scope import ScopeValidator
 from phobos.graph.graph import Graph
 from phobos.recon.crawler import ReconCrawler
@@ -34,6 +34,11 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds")
     scan.add_argument("--max-pages", type=int, default=100, help="maximum pages to crawl")
     scan.add_argument("--user-agent", default="Phobos/0.1", help="HTTP User-Agent")
+    scan.add_argument(
+        "--allow-private-targets",
+        action="store_true",
+        help="allow targets resolving to private/reserved IPs; use only for authorized lab/internal targets",
+    )
     return parser
 
 
@@ -42,13 +47,19 @@ def run_scan(args: argparse.Namespace) -> int:
         target=args.target,
         scopes=tuple(args.scopes or ()),
         output_dir=args.output,
+        timeout=args.timeout,
+        max_pages=args.max_pages,
+        allow_private_targets=args.allow_private_targets,
     )
-    scope = ScopeValidator(config.normalized_scopes)
+    scope = ScopeValidator(
+        config.normalized_scopes,
+        allow_private_targets=config.allow_private_targets,
+    )
     request_manager = RequestManager(
         scope,
         timeout=config.timeout,
         max_redirects=config.max_redirects,
-        user_agent=config.user_agent,
+        user_agent=args.user_agent,
         max_response_bytes=config.max_response_bytes,
     )
     store = EvidenceStore(config.output_dir)
@@ -74,11 +85,12 @@ def run_scan(args: argparse.Namespace) -> int:
     print()
 
     try:
-        result = ReconCrawler(request_manager, max_pages=args.max_pages).crawl(config.target, graph=graph)
+        result = ReconCrawler(request_manager, max_pages=config.max_pages).crawl(config.target, graph=graph)
     except RequestError as exc:
         store.write_json(
             "scan.json",
             {
+                "schema_version": "1.0",
                 "target": config.target,
                 "scopes": list(scope.allowed_domains),
                 "status": "failed",
@@ -106,11 +118,12 @@ def run_scan(args: argparse.Namespace) -> int:
                 "pages": len(result.pages),
                 "forms": len(result.forms),
                 "inputs": len(result.inputs),
-                "api_endpoints": 0,
+                "endpoints": len(result.endpoints),
                 "javascript_files": len(result.javascript),
                 "errors": len(result.errors),
             },
-            "crawler": {"max_pages": args.max_pages},
+            "crawler": {"max_pages": config.max_pages},
+            "security": {"allow_private_targets": config.allow_private_targets},
         },
     )
     store.write_json("assets.json", [asset.to_dict() for asset in assets])
@@ -120,8 +133,8 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"✓ {len(result.pages)} pages discovered")
     print(f"✓ {len(result.forms)} forms discovered")
     print(f"✓ {len(result.inputs)} input parameters discovered")
-    print("✓ 0 API endpoints discovered")
-    print(f"✓ {len(result.javascript)} JavaScript files analyzed")
+    print(f"✓ {len(result.endpoints)} endpoints discovered")
+    print(f"✓ {len(result.javascript)} JavaScript references discovered")
     if result.errors:
         print(f"! {len(result.errors)} recoverable errors")
     print()
