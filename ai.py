@@ -1,7 +1,8 @@
-"""AI command interpreter for the first Phobos agent build.
+"""Local AI command planner for the first Phobos agent build.
 
-The model never gets shell access. It can only select the single supported
-reconnaissance action; Phobos constructs and validates the actual nmap command.
+Phobos talks to an OpenAI-compatible local inference server running
+Dolphin-Mistral-24B-Venice-Edition. The model never gets shell access;
+it can only select the single supported reconnaissance action.
 """
 from __future__ import annotations
 
@@ -14,29 +15,31 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 
+MODEL_NAME = "dphn/Dolphin-Mistral-24B-Venice-Edition"
+DEFAULT_BASE_URL = "http://127.0.0.1:8000/v1/chat/completions"
+
+
 class AIError(RuntimeError):
     """Raised when the configured AI provider cannot be used safely."""
 
 
 @dataclass(frozen=True, slots=True)
 class AIConfig:
-    api_key: str
-    base_url: str = "https://api.openai.com/v1/responses"
-    model: str = "gpt-5.6-luna"
+    base_url: str = DEFAULT_BASE_URL
+    model: str = MODEL_NAME
+    api_key: str = ""
     timeout: float = 30.0
 
     @classmethod
     def from_env(cls) -> "AIConfig":
-        key = os.environ.get("OPENAI_API_KEY", "").strip()
-        if not key:
-            raise AIError("OPENAI_API_KEY is not set")
         base_url = os.environ.get("PHOBOS_AI_URL", cls.base_url).strip()
         model = os.environ.get("PHOBOS_AI_MODEL", cls.model).strip()
+        api_key = os.environ.get("PHOBOS_AI_API_KEY", "").strip()
         if not base_url.startswith(("https://", "http://")):
             raise AIError("PHOBOS_AI_URL must be an http(s) URL")
         if not model:
             raise AIError("PHOBOS_AI_MODEL must not be empty")
-        return cls(api_key=key, base_url=base_url, model=model)
+        return cls(base_url=base_url, model=model, api_key=api_key)
 
 
 SYSTEM_PROMPT = """You are the planning component of Phobos, an authorized security-testing tool.
@@ -53,6 +56,16 @@ def _extract_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
+
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
 
     pieces: list[str] = []
     for item in payload.get("output", []) if isinstance(payload.get("output"), list) else []:
@@ -87,8 +100,8 @@ def _parse_decision(text: str) -> dict[str, str]:
     return {"action": action, "reason": reason[:500]}
 
 
-class OpenAIResponsesClient:
-    """Minimal standard-library client for the OpenAI Responses API."""
+class OpenAICompatibleClient:
+    """Minimal standard-library client for an OpenAI-compatible local endpoint."""
 
     def __init__(self, config: AIConfig):
         self.config = config
@@ -99,23 +112,22 @@ class OpenAIResponsesClient:
             raise AIError("request must not be empty")
         body = {
             "model": self.config.model,
-            "input": [
-                {"role": "system", "content": [{"type": "input_text", "text": SYSTEM_PROMPT}]},
-                {"role": "user", "content": [{"type": "input_text", "text": request_text[:4000]}]},
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": request_text[:4000]},
             ],
+            "temperature": 0.15,
+            "max_tokens": 200,
         }
         encoded = json.dumps(body).encode("utf-8")
-        request = Request(
-            self.config.base_url,
-            data=encoded,
-            method="POST",
-            headers={
-                "Authorization": f"Bearer {self.config.api_key}",
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-                "User-Agent": "Phobos/0.1",
-            },
-        )
+        headers = {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": "Phobos/0.1",
+        }
+        if self.config.api_key:
+            headers["Authorization"] = f"Bearer {self.config.api_key}"
+        request = Request(self.config.base_url, data=encoded, method="POST", headers=headers)
         try:
             with urlopen(request, timeout=self.config.timeout) as response:
                 raw = response.read(1_000_000)
@@ -132,3 +144,7 @@ class OpenAIResponsesClient:
         if not isinstance(payload, dict):
             raise AIError("AI provider returned an invalid response")
         return _parse_decision(_extract_text(payload))
+
+
+# Backwards-compatible name for callers that used the first implementation.
+OpenAIResponsesClient = OpenAICompatibleClient
