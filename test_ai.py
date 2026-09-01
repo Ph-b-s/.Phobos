@@ -7,7 +7,7 @@ import pytest
 
 import ai
 import nmap_runner
-from nmap_runner import NmapError, run_top_ports_scan, target_host
+from nmap_runner import NmapError, prepare_top_ports_scan, run_top_ports_scan, target_host
 from scope import ScopeValidator
 
 
@@ -28,6 +28,16 @@ def test_parse_decision_handles_markdown_json() -> None:
     assert result["action"] == "refuse"
 
 
+def test_parse_decision_rejects_non_object() -> None:
+    with pytest.raises(ai.AIError):
+        ai._parse_decision('[{"action":"nmap_top_ports"}]')
+
+
+def test_parse_decision_rejects_missing_reason_type() -> None:
+    with pytest.raises(ai.AIError):
+        ai._parse_decision('{"action":"refuse","reason":123}')
+
+
 def test_target_host_rejects_ports_and_paths() -> None:
     with pytest.raises(NmapError):
         target_host("example.com:8080")
@@ -37,6 +47,13 @@ def test_target_host_rejects_ports_and_paths() -> None:
 
 def test_target_host_accepts_hostname() -> None:
     assert target_host("https://Example.COM/") == "example.com"
+
+
+def test_nmap_prepare_is_side_effect_free(monkeypatch: pytest.MonkeyPatch) -> None:
+    scope = ScopeValidator(("scanme.nmap.org",), allow_private_targets=True)
+    monkeypatch.setattr(nmap_runner.shutil, "which", lambda name: "/usr/bin/nmap")
+    command = prepare_top_ports_scan("scanme.nmap.org", scope)
+    assert command[-1] == "scanme.nmap.org"
 
 
 def test_nmap_runner_uses_fixed_safe_command(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,6 +93,15 @@ def test_nmap_runner_uses_fixed_safe_command(monkeypatch: pytest.MonkeyPatch) ->
         "check": False,
         "shell": False,
     }
+
+
+def test_nmap_dry_run_never_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+    scope = ScopeValidator(("example.com",), allow_private_targets=True)
+    monkeypatch.setattr(nmap_runner.shutil, "which", lambda name: "/usr/bin/nmap")
+    monkeypatch.setattr(nmap_runner.subprocess, "run", pytest.fail)
+    result = run_top_ports_scan("example.com", scope, execute=False)
+    assert result.returncode == 0
+    assert result.stdout == ""
 
 
 def test_nmap_runner_blocks_out_of_scope_host(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -120,3 +146,53 @@ def test_response_text_supports_openai_compatible_shape() -> None:
         "choices": [{"message": {"content": json.dumps({"action": "refuse", "reason": "no"})}}]
     }
     assert ai._extract_text(payload).startswith("{")
+
+
+def test_venice_client_builds_expected_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size):
+            return json.dumps({
+                "choices": [{"message": {"content": '{"action":"refuse","reason":"test"}'}}]
+            }).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        captured["request"] = request
+        captured["timeout"] = timeout
+        return FakeResponse()
+
+    monkeypatch.setattr(ai, "urlopen", fake_urlopen)
+    client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
+    decision = client.decide("say no")
+
+    request = captured["request"]
+    payload = json.loads(request.data.decode("utf-8"))
+    assert decision["action"] == "refuse"
+    assert payload["model"] == "venice-uncensored"
+    assert payload["messages"][1]["content"] == "say no"
+    assert request.get_header("Authorization") == "Bearer secret"
+    assert captured["timeout"] == 30.0
+
+
+def test_ai_client_rejects_oversized_response(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size):
+            return b"x" * (ai.MAX_RESPONSE_BYTES + 1)
+
+    monkeypatch.setattr(ai, "urlopen", lambda request, timeout: FakeResponse())
+    client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
+    with pytest.raises(ai.AIError, match="size limit"):
+        client.decide("test")
