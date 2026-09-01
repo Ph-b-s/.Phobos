@@ -36,6 +36,29 @@ def test_recon_queue_is_bounded():
     assert any("discovery queue limit reached" in error for error in result.errors)
 
 
+def test_recon_queue_deduplicates_links():
+    root = "https://example.com/"
+    response = HTTPResponseData(
+        root,
+        200,
+        {"content-type": "text/html"},
+        b'<a href="/same">one</a><a href="/same">two</a>',
+    )
+    same = HTTPResponseData(
+        "https://example.com/same",
+        200,
+        {"content-type": "text/plain"},
+        b"ok",
+    )
+    manager = FakeRequestManager(
+        ScopeValidator(("example.com",), allow_private_targets=True),
+        {root: response, "https://example.com/same": same},
+    )
+    result = ReconCrawler(manager, max_pages=5, max_discovered_urls=5).crawl(root)
+    assert len(result.pages) == 1
+    assert len(result.endpoints) == 1
+
+
 def test_recon_queue_limit_must_cover_page_budget():
     manager = FakeRequestManager(
         ScopeValidator(("example.com",), allow_private_targets=True),
