@@ -103,8 +103,7 @@ class RequestManager:
             if location and status in {301, 302, 303, 307, 308}:
                 if redirect_count >= self.max_redirects:
                     raise RequestError(f"maximum redirects exceeded for {url}")
-                next_url = self._validate(urljoin(final_url, location))
-                current_url = next_url
+                current_url = self._validate(urljoin(final_url, location))
                 if status == 303 or (status in {301, 302} and method.upper() == "POST"):
                     method = "GET"
                     body = None
