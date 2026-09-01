@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "phobos-ai-security"
 version = "0.1.0"
-description = "Core reconnaissance and attack-surface graph for authorized AI security testing"
+description = "AI security reconnaissance and attack-surface mapping framework"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = []
@@ -13,11 +13,9 @@ dependencies = []
 [project.optional-dependencies]
 dev = ["pytest>=8"]
 
-[tool.setuptools.packages.find]
-include = ["phobos*"]
-
 [project.scripts]
-phobos = "phobos.cli.main:main"
+phobos = "cli:main"
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["."]
+python_files = ["test_*.py"]
