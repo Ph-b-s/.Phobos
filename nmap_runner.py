@@ -33,7 +33,12 @@ def target_host(target: str) -> str:
     return parsed.hostname
 
 
-def prepare_top_ports_scan(target: str, scope: ScopeValidator) -> tuple[str, ...]:
+def prepare_top_ports_scan(
+    target: str,
+    scope: ScopeValidator,
+    *,
+    require_nmap: bool = True,
+) -> tuple[str, ...]:
     """Validate scope and return the fixed Nmap command without executing it."""
     host = target_host(target)
     try:
@@ -41,7 +46,7 @@ def prepare_top_ports_scan(target: str, scope: ScopeValidator) -> tuple[str, ...
     except ScopeError as exc:
         raise NmapError(str(exc)) from exc
 
-    binary = shutil.which("nmap")
+    binary = shutil.which("nmap") if require_nmap else "nmap"
     if not binary:
         raise NmapError("nmap was not found in PATH; install nmap on Kali Linux first")
 
@@ -67,7 +72,7 @@ def run_top_ports_scan(
     if timeout <= 0:
         raise NmapError("nmap timeout must be positive")
 
-    command = prepare_top_ports_scan(target, scope)
+    command = prepare_top_ports_scan(target, scope, require_nmap=execute)
     if not execute:
         return NmapResult(command=command, returncode=0, stdout="", stderr="")
 
