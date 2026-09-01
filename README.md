@@ -1,39 +1,85 @@
 # Phobos
 
-**Modular AI Security Testing Framework**
+**AI Security Reconnaissance & Attack-Surface Graph**
 
-Phobos is an extensible framework for authorized security testing of AI applications and agents. It combines automated scanners with a common finding model so specialized tests can be composed into larger assessments.
+Phobos is an extensible framework for authorized security testing of web applications and AI systems. The first build establishes the core that every later module will use: scoped HTTP traffic, normalized assets, an execution graph, and evidence-backed scan state.
 
-## Architecture
+## First Build
 
 ```text
-Target
-  │
-  ▼
-Phobos Engine
-  ├── Scanner Registry
-  ├── Scanner Modules
-  │    ├── Prompt Injection
-  │    ├── Agent / Tool Abuse
-  │    ├── Data / Secret Leakage
-  │    └── Guardrail Testing
-  └── Normalized Findings
-         │
-         ▼
-      Reporting
+Target URL
+    │
+    ▼
+   CLI
+    │
+    ▼
+ Configuration
+    │
+    ▼
+ Scope Validator
+    │
+    ▼
+ Request Manager ──────► HTTP
+    │
+    ▼
+ Unified Asset Model
+    │
+    ▼
+ Graph Engine
+    │
+    ▼
+ Evidence Storage
 ```
 
-## Status
+Every outbound request passes through the centralized scope validator. Redirects are stopped and re-validated before another network request is made.
 
-Early development. The first milestone establishes the core Python package, scanner abstraction, registry, normalized findings, CLI foundation, and tests.
+## Repository Structure
 
-## Development
+```text
+.phobos/
+├── phobos/
+│   ├── cli/
+│   │   └── main.py
+│   ├── core/
+│   │   ├── config.py
+│   │   ├── models.py
+│   │   ├── request_manager.py
+│   │   └── scope.py
+│   ├── graph/
+│   │   ├── graph.py
+│   │   └── nodes.py
+│   └── storage/
+│       └── evidence.py
+├── tests/
+├── pyproject.toml
+└── README.md
+```
 
-Requires Python 3.11+.
+## CLI
+
+```bash
+pip install -e .
+phobos scan https://example.com
+phobos scan https://example.com --scope example.com --output .phobos
+```
+
+A scan currently establishes the target, validates scope, performs the first HTTP request, creates the initial website/page assets and graph relationship, and writes:
+
+```text
+.phobos/
+├── scan.json
+├── assets.json
+├── graph.json
+├── findings.json
+└── evidence/
+```
+
+The crawler is the next layer. It will populate the same asset and graph model with pages, links, forms, inputs, APIs and JavaScript references rather than introducing a second data model.
+
+## Tests
 
 ```bash
 python -m pytest
-python -m phobos.cli scanners
 ```
 
 Only test systems you own or are explicitly authorized to assess.
