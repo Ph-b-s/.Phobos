@@ -1,9 +1,8 @@
-"""Venice AI planner for the first Phobos agent build.
+"""Venice AI planner for safe, web-focused Phobos actions.
 
-Phobos uses Venice's OpenAI-compatible API with the Dolphin Mistral 24B
-Venice Edition, exposed by Venice as ``venice-uncensored``. The model never
-gets shell access; it can only select a single predefined reconnaissance
-action.
+The model plans only between predefined Phobos capabilities. It never receives
+shell access, target selection authority, HTTP execution authority, or the
+ability to provide arbitrary tool arguments.
 """
 from __future__ import annotations
 
@@ -20,11 +19,13 @@ DEFAULT_BASE_URL = "https://api.venice.ai/api/v1/chat/completions"
 MAX_REQUEST_CHARS = 4_000
 MAX_RESPONSE_BYTES = 1_000_000
 MAX_REASON_CHARS = 500
-SUPPORTED_ACTIONS = frozenset({"nmap_top_ports", "refuse"})
+SUPPORTED_ACTIONS = frozenset({"web_recon", "ai_surface_discovery", "refuse"})
 REQUIRED_DECISION_KEYS = frozenset({"action", "reason"})
+
 
 class AIError(RuntimeError):
     """Raised when the AI provider cannot be used safely."""
+
 
 @dataclass(frozen=True, slots=True)
 class AIConfig:
@@ -46,14 +47,18 @@ class AIConfig:
             raise AIError("VENICE_API_KEY is not set")
         return cls(base_url=base_url, model=model, api_key=api_key)
 
-SYSTEM_PROMPT = """You are the planning component of Phobos, an authorized security-testing tool.
-Your ONLY supported action is a simple TCP top-ports reconnaissance scan using nmap.
-You must never produce shell commands, nmap arguments, scripts, pipelines, or code.
-Return exactly one JSON object and nothing else with exactly these two keys:
-{"action":"nmap_top_ports","reason":"brief explanation"}
-If the user request is unrelated to this action, refuse it with:
-{"action":"refuse","reason":"brief explanation"}
+
+SYSTEM_PROMPT = """You are the planning component of Phobos, an authorized web and AI security testing tool.
+Your ONLY supported actions are:
+- web_recon: scoped passive web reconnaissance of the explicit target
+- ai_surface_discovery: scoped passive discovery of likely AI endpoints, agent signals, and AI inputs
+- refuse: when the request is unrelated or asks for an unsupported capability
+You must never produce shell commands, URLs, request bodies, credentials, exploit payloads, scripts, or tool arguments.
+The target is supplied separately by Phobos and cannot be changed by you.
+Return exactly one JSON object with exactly these two keys:
+{"action":"web_recon","reason":"brief explanation"}
 """
+
 
 def _extract_text(payload: dict[str, Any]) -> str:
     choices = payload.get("choices")
@@ -85,6 +90,7 @@ def _extract_text(payload: dict[str, Any]) -> str:
         return text
     raise AIError("AI response contained no text")
 
+
 def _parse_decision(text: str) -> dict[str, str]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
@@ -110,6 +116,7 @@ def _parse_decision(text: str) -> dict[str, str]:
         raise AIError("AI decision reason must not be empty")
     return {"action": action, "reason": reason[:MAX_REASON_CHARS]}
 
+
 class VeniceClient:
     """Minimal standard-library client for the Venice OpenAI-compatible API."""
 
@@ -130,7 +137,7 @@ class VeniceClient:
                 {"role": "system", "content": SYSTEM_PROMPT},
                 {"role": "user", "content": request_text},
             ],
-            "temperature": 0.15,
+            "temperature": 0.1,
             "max_tokens": 200,
             "stream": False,
         }
@@ -143,7 +150,7 @@ class VeniceClient:
                 "Authorization": f"Bearer {self.config.api_key}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "Phobos/0.1",
+                "User-Agent": "Phobos/0.2",
             },
         )
         try:
@@ -164,4 +171,6 @@ class VeniceClient:
             raise AIError("AI provider returned an invalid response")
         return _parse_decision(_extract_text(payload))
 
+
+# Backward-compatible name for integrations that imported the old class.
 OpenAIResponsesClient = VeniceClient

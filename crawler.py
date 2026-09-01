@@ -1,4 +1,4 @@
-"""Scoped, bounded HTML reconnaissance crawler."""
+"""Scoped, bounded HTML reconnaissance crawler with passive AI-surface discovery."""
 from __future__ import annotations
 
 from collections import deque
@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
+from ai_surface import detect_ai_surfaces
 from graph import Graph
 from models import Asset, AssetType, EndpointAsset, FormAsset, InputAsset
 from request_manager import RequestError, RequestManager
@@ -14,12 +15,16 @@ _SKIP = {"mailto", "tel", "javascript", "data", "blob"}
 
 
 def normalize_url(base_url: str, raw_url: str) -> str | None:
-    candidate = urljoin(base_url, raw_url.strip())
-    p = urlparse(candidate)
-    if p.scheme.lower() not in {"http", "https"} or not p.hostname:
+    if not raw_url or not raw_url.strip():
         return None
-    q = urlencode(sorted(parse_qsl(p.query, keep_blank_values=True)))
-    return urlunparse((p.scheme.lower(), p.netloc.lower(), p.path or "/", "", q, ""))
+    candidate = urljoin(base_url, raw_url.strip())
+    parsed = urlparse(candidate)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return None
+    query = urlencode(sorted(parse_qsl(parsed.query, keep_blank_values=True)))
+    return urlunparse(
+        (parsed.scheme.lower(), parsed.netloc.lower(), parsed.path or "/", "", query, "")
+    )
 
 
 @dataclass(slots=True)
@@ -34,10 +39,10 @@ class _Parser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.base_url = base_url
         self.result = ParsedPage()
-        self._form = None
+        self._form: dict | None = None
 
-    def handle_starttag(self, tag: str, attrs):
-        mapping = {k.lower(): v or "" for k, v in attrs}
+    def handle_starttag(self, tag: str, attrs) -> None:
+        mapping = {key.lower(): value or "" for key, value in attrs}
         tag = tag.lower()
         if tag == "a" and mapping.get("href"):
             raw = mapping["href"]
@@ -58,9 +63,11 @@ class _Parser(HTMLParser):
             }
             self.result.forms.append(self._form)
         elif tag in {"input", "textarea", "select", "button"} and self._form is not None:
-            self._form["inputs"].append({"name": mapping.get("name", ""), "type": mapping.get("type", tag)})
+            self._form["inputs"].append(
+                {"name": mapping.get("name", ""), "type": mapping.get("type", tag)}
+            )
 
-    def handle_endtag(self, tag: str):
+    def handle_endtag(self, tag: str) -> None:
         if tag.lower() == "form":
             self._form = None
 
@@ -72,15 +79,29 @@ class ReconResult:
     forms: tuple[FormAsset, ...]
     inputs: tuple[InputAsset, ...]
     javascript: tuple[Asset, ...]
+    ai_surfaces: tuple[Asset, ...]
     errors: tuple[str, ...]
 
     @property
-    def assets(self):
-        return (*self.pages, *self.endpoints, *self.forms, *self.inputs, *self.javascript)
+    def assets(self) -> tuple[Asset, ...]:
+        return (
+            *self.pages,
+            *self.endpoints,
+            *self.forms,
+            *self.inputs,
+            *self.javascript,
+            *self.ai_surfaces,
+        )
 
 
 class ReconCrawler:
-    def __init__(self, request_manager: RequestManager, *, max_pages: int = 100, max_discovered_urls: int = 5000):
+    def __init__(
+        self,
+        request_manager: RequestManager,
+        *,
+        max_pages: int = 100,
+        max_discovered_urls: int = 5000,
+    ):
         if max_pages < 1:
             raise ValueError("max_pages must be at least 1")
         if max_discovered_urls < max_pages:
@@ -92,18 +113,23 @@ class ReconCrawler:
     def crawl(self, target: str, *, graph: Graph | None = None) -> ReconResult:
         start = normalize_url(target, target) or target
         queue = deque([start])
-        queued = {start}
-        visited = set()
-        seen_ep = set()
-        seen_js = set()
-        seen_q = set()
-        counters = {k: 0 for k in ("page", "endpoint", "form", "input", "javascript")}
-        pages = []
-        endpoints = []
-        forms = []
-        inputs = []
-        js = []
-        errors = []
+        discovered = {start}
+        visited: set[str] = set()
+        seen_endpoints: set[str] = set()
+        seen_js: set[str] = set()
+        seen_query_inputs: set[tuple[str, str]] = set()
+        seen_ai: set[tuple[str, str]] = set()
+        counters = {
+            kind: 0
+            for kind in ("page", "endpoint", "form", "input", "javascript", "ai_surface")
+        }
+        pages: list[Asset] = []
+        endpoints: list[EndpointAsset] = []
+        forms: list[FormAsset] = []
+        inputs: list[InputAsset] = []
+        js: list[Asset] = []
+        ai_surfaces: list[Asset] = []
+        errors: list[str] = []
         queue_limit_reported = False
 
         while queue and len(visited) < self.max_pages:
@@ -116,8 +142,9 @@ class ReconCrawler:
             except RequestError as exc:
                 errors.append(f"{url}: {exc}")
                 continue
-            ctype = response.headers.get("content-type", "").lower()
-            if "text/html" not in ctype and "application/xhtml+xml" not in ctype:
+
+            content_type = response.headers.get("content-type", "").lower()
+            if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
                 continue
 
             counters["page"] += 1
@@ -127,7 +154,7 @@ class ReconCrawler:
                 response.url,
                 response.url,
                 1.0,
-                {"status_code": response.status, "content_type": ctype},
+                {"status_code": response.status, "content_type": content_type},
             )
             pages.append(page)
             if graph is not None:
@@ -144,52 +171,58 @@ class ReconCrawler:
             for link in sorted(parser.result.links):
                 if not self.request_manager.scope.is_in_scope(link):
                     continue
-                if link not in visited and link not in queued:
-                    if len(queued) >= self.max_discovered_urls:
+                if link not in visited and link not in discovered:
+                    if len(discovered) >= self.max_discovered_urls:
                         if not queue_limit_reported:
                             errors.append("discovery queue limit reached; additional URLs were ignored")
                             queue_limit_reported = True
                     else:
                         queue.append(link)
-                        queued.add(link)
-                if link not in seen_ep:
-                    seen_ep.add(link)
-                    counters["endpoint"] += 1
-                    endpoint = EndpointAsset(
-                        f"endpoint_{counters['endpoint']:04d}",
-                        AssetType.ENDPOINT,
+                        discovered.add(link)
+                if link in seen_endpoints:
+                    continue
+                seen_endpoints.add(link)
+                counters["endpoint"] += 1
+                endpoint = EndpointAsset(
+                    f"endpoint_{counters['endpoint']:04d}",
+                    AssetType.ENDPOINT,
+                    link,
+                    link,
+                    0.95,
+                    {},
+                    "GET",
+                    None,
+                )
+                endpoints.append(endpoint)
+                if graph is not None:
+                    graph.add_node(id=endpoint.id, type=endpoint.type.value, label=endpoint.name)
+                    graph.add_edge(source=page.id, target=endpoint.id, relationship="links_to")
+                for name, _ in parse_qsl(urlparse(link).query, keep_blank_values=True):
+                    key = (link, name)
+                    if not name or key in seen_query_inputs:
+                        continue
+                    seen_query_inputs.add(key)
+                    counters["input"] += 1
+                    input_asset = InputAsset(
+                        f"input_{counters['input']:04d}",
+                        AssetType.INPUT,
+                        name,
                         link,
-                        link,
-                        0.95,
-                        {},
+                        1.0,
+                        {"source_endpoint": link, "source_page": response.url},
+                        "query",
+                        "query",
                         "GET",
-                        None,
                     )
-                    endpoints.append(endpoint)
+                    inputs.append(input_asset)
                     if graph is not None:
-                        graph.add_node(id=endpoint.id, type=endpoint.type.value, label=endpoint.name)
-                        graph.add_edge(source=page.id, target=endpoint.id, relationship="links_to")
-                    for name, _ in parse_qsl(urlparse(link).query, keep_blank_values=True):
-                        key = (link, name)
-                        if not name or key in seen_q:
-                            continue
-                        seen_q.add(key)
-                        counters["input"] += 1
-                        input_asset = InputAsset(
-                            f"input_{counters['input']:04d}",
-                            AssetType.INPUT,
-                            name,
-                            link,
-                            1.0,
-                            {"source_endpoint": link, "source_page": response.url},
-                            "query",
-                            "query",
-                            "GET",
+                        graph.add_node(
+                            id=input_asset.id,
+                            type=input_asset.type.value,
+                            label=input_asset.name,
+                            attributes=input_asset.metadata,
                         )
-                        inputs.append(input_asset)
-                        if graph is not None:
-                            graph.add_node(id=input_asset.id, type=input_asset.type.value, label=input_asset.name, attributes=input_asset.metadata)
-                            graph.add_edge(source=endpoint.id, target=input_asset.id, relationship="accepts")
+                        graph.add_edge(source=endpoint.id, target=input_asset.id, relationship="accepts")
 
             for script in sorted(parser.result.scripts):
                 if not self.request_manager.scope.is_in_scope(script) or script in seen_js:
@@ -206,10 +239,15 @@ class ReconCrawler:
                 )
                 js.append(asset)
                 if graph is not None:
-                    graph.add_node(id=asset.id, type=asset.type.value, label=asset.name, attributes=asset.metadata)
+                    graph.add_node(
+                        id=asset.id,
+                        type=asset.type.value,
+                        label=asset.name,
+                        attributes=asset.metadata,
+                    )
                     graph.add_edge(source=page.id, target=asset.id, relationship="loads")
 
-            for idx, form_data in enumerate(parser.result.forms, 1):
+            for index, form_data in enumerate(parser.result.forms, 1):
                 if not self.request_manager.scope.is_in_scope(form_data["action"]):
                     continue
                 counters["form"] += 1
@@ -217,7 +255,7 @@ class ReconCrawler:
                 form = FormAsset(
                     f"form_{counters['form']:04d}",
                     AssetType.FORM,
-                    f"{response.url}#{idx}",
+                    f"{response.url}#{index}",
                     form_data["action"],
                     1.0,
                     {"source_page": response.url},
@@ -245,7 +283,51 @@ class ReconCrawler:
                     )
                     inputs.append(input_asset)
                     if graph is not None:
-                        graph.add_node(id=input_asset.id, type=input_asset.type.value, label=input_asset.name, attributes=input_asset.metadata)
+                        graph.add_node(
+                            id=input_asset.id,
+                            type=input_asset.type.value,
+                            label=input_asset.name,
+                            attributes=input_asset.metadata,
+                        )
                         graph.add_edge(source=form.id, target=input_asset.id, relationship="accepts")
 
-        return ReconResult(tuple(pages), tuple(endpoints), tuple(forms), tuple(inputs), tuple(js), tuple(errors))
+            for candidate in detect_ai_surfaces(
+                response.url,
+                response.text,
+                links=parser.result.links,
+                scripts=parser.result.scripts,
+                forms=parser.result.forms,
+            ):
+                if not self.request_manager.scope.is_in_scope(candidate.url):
+                    continue
+                if candidate.key() in seen_ai:
+                    continue
+                seen_ai.add(candidate.key())
+                counters["ai_surface"] += 1
+                asset = Asset(
+                    f"ai_surface_{counters['ai_surface']:04d}",
+                    AssetType.AI_AGENT,
+                    candidate.kind,
+                    candidate.url,
+                    candidate.confidence,
+                    {"source_page": response.url, "evidence": list(candidate.evidence)},
+                )
+                ai_surfaces.append(asset)
+                if graph is not None:
+                    graph.add_node(
+                        id=asset.id,
+                        type=asset.type.value,
+                        label=asset.name,
+                        attributes=asset.metadata,
+                    )
+                    graph.add_edge(source=page.id, target=asset.id, relationship="signals")
+
+        return ReconResult(
+            tuple(pages),
+            tuple(endpoints),
+            tuple(forms),
+            tuple(inputs),
+            tuple(js),
+            tuple(ai_surfaces),
+            tuple(errors),
+        )

@@ -11,16 +11,28 @@ from nmap_runner import NmapError, prepare_top_ports_scan, run_top_ports_scan, t
 from scope import ScopeValidator
 
 
-def test_parse_decision_accepts_supported_action() -> None:
-    assert ai._parse_decision('{"action":"nmap_top_ports","reason":"basic recon"}') == {
-        "action": "nmap_top_ports",
-        "reason": "basic recon",
+def test_parse_decision_accepts_web_recon() -> None:
+    assert ai._parse_decision('{"action":"web_recon","reason":"map the web surface"}') == {
+        "action": "web_recon",
+        "reason": "map the web surface",
     }
+
+
+def test_parse_decision_accepts_ai_surface_discovery() -> None:
+    result = ai._parse_decision(
+        '{"action":"ai_surface_discovery","reason":"identify likely AI entry points"}'
+    )
+    assert result["action"] == "ai_surface_discovery"
 
 
 def test_parse_decision_rejects_arbitrary_action() -> None:
     with pytest.raises(ai.AIError):
         ai._parse_decision('{"action":"shell","reason":"run anything"}')
+
+
+def test_parse_decision_rejects_nmap_as_ai_action() -> None:
+    with pytest.raises(ai.AIError):
+        ai._parse_decision('{"action":"nmap_top_ports","reason":"network scan"}')
 
 
 def test_parse_decision_rejects_extra_fields() -> None:
@@ -45,7 +57,7 @@ def test_parse_decision_handles_markdown_json() -> None:
 
 def test_parse_decision_rejects_non_object() -> None:
     with pytest.raises(ai.AIError):
-        ai._parse_decision('[{"action":"nmap_top_ports"}]')
+        ai._parse_decision('[{"action":"web_recon"}]')
 
 
 def test_parse_decision_rejects_invalid_reason_type() -> None:
@@ -184,7 +196,7 @@ def test_venice_client_builds_expected_request(monkeypatch: pytest.MonkeyPatch) 
 
         def read(self, size):
             return json.dumps({
-                "choices": [{"message": {"content": '{"action":"refuse","reason":"test"}'}}]
+                "choices": [{"message": {"content": '{"action":"web_recon","reason":"test"}'}}]
             }).encode("utf-8")
 
     def fake_urlopen(request, timeout):
@@ -194,13 +206,13 @@ def test_venice_client_builds_expected_request(monkeypatch: pytest.MonkeyPatch) 
 
     monkeypatch.setattr(ai, "urlopen", fake_urlopen)
     client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
-    decision = client.decide("say no")
+    decision = client.decide("map the web surface")
 
     request = captured["request"]
     payload = json.loads(request.data.decode("utf-8"))
-    assert decision["action"] == "refuse"
+    assert decision["action"] == "web_recon"
     assert payload["model"] == "venice-uncensored"
-    assert payload["messages"][1]["content"] == "say no"
+    assert payload["messages"][1]["content"] == "map the web surface"
     assert request.get_header("Authorization") == "Bearer secret"
     assert captured["timeout"] == 30.0
 

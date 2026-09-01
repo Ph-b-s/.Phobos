@@ -18,9 +18,18 @@ def test_recon_queue_is_bounded():
     root = "https://example.com/"
     links = "".join(f'<a href="/p{i}">p{i}</a>' for i in range(20))
     response = HTTPResponseData(root, 200, {"content-type": "text/html"}, links.encode())
+    pages = {root: response}
+    pages.update(
+        {
+            f"https://example.com/p{i}": HTTPResponseData(
+                f"https://example.com/p{i}", 200, {"content-type": "text/plain"}, b"ok"
+            )
+            for i in range(4)
+        }
+    )
     manager = FakeRequestManager(
         ScopeValidator(("example.com",), allow_private_targets=True),
-        {root: response},
+        pages,
     )
     result = ReconCrawler(manager, max_pages=5, max_discovered_urls=5).crawl(root)
     assert len(result.pages) == 1

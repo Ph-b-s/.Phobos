@@ -3,8 +3,8 @@ from __future__ import annotations
 
 import argparse
 import os
-import shutil
 import sys
+from urllib.parse import urlparse
 
 from ai import AIConfig, AIError, VeniceClient
 from config import ScanConfig
@@ -12,36 +12,43 @@ from crawler import ReconCrawler
 from evidence import EvidenceStore
 from graph import Graph
 from models import Asset, AssetType
-from nmap_runner import NmapError, run_top_ports_scan
 from request_manager import RequestError, RequestManager
 from scope import ScopeValidator
 
-PHOBOS_VERSION = "0.1.1"
+PHOBOS_VERSION = "0.2.0"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="phobos",
-        description="Phobos — scoped AI security reconnaissance and attack-surface mapping.",
+        description="Phobos — scoped web and AI security reconnaissance.",
     )
     parser.add_argument("--version", action="version", version=f"Phobos {PHOBOS_VERSION}")
     sub = parser.add_subparsers(dest="command")
 
-    scan = sub.add_parser("scan", help="run a scoped web reconnaissance scan")
-    scan.add_argument("target", help="absolute http(s) target URL")
+    scan = sub.add_parser("scan", help="run scoped passive web reconnaissance")
+    scan.add_argument("target", help="absolute HTTP(S) target URL")
     scan.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
     scan.add_argument("--output", default=".phobos")
     scan.add_argument("--timeout", type=float, default=10.0)
     scan.add_argument("--max-pages", type=int, default=100)
-    scan.add_argument("--user-agent", default="Phobos/0.1")
+    scan.add_argument("--max-discovered-urls", type=int, default=5_000)
+    scan.add_argument("--user-agent", default="Phobos/0.2")
     scan.add_argument("--allow-private-targets", action="store_true")
 
-    agent = sub.add_parser("ai", help="ask Venice Uncensored to select Phobos's safe nmap action")
-    agent.add_argument("request", nargs="+", help="natural-language request")
-    agent.add_argument("--target", required=True, help="hostname or IP to scan; never chosen by the AI")
+    agent = sub.add_parser(
+        "ai",
+        help="use Venice Uncensored to select a predefined web-security reconnaissance action",
+    )
+    agent.add_argument("request", nargs="+", help="natural-language security request")
+    agent.add_argument("--target", required=True, help="explicit HTTP(S) target; the AI cannot change it")
     agent.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
-    agent.add_argument("--timeout", type=float, default=60.0, help="maximum nmap runtime in seconds")
-    agent.add_argument("--dry-run", action="store_true", help="ask the AI and show the fixed Nmap command without executing it")
+    agent.add_argument("--output", default=".phobos")
+    agent.add_argument("--timeout", type=float, default=10.0)
+    agent.add_argument("--max-pages", type=int, default=100)
+    agent.add_argument("--max-discovered-urls", type=int, default=5_000)
+    agent.add_argument("--user-agent", default="Phobos/0.2")
+    agent.add_argument("--dry-run", action="store_true", help="plan only; do not send web requests")
     agent.add_argument("--allow-private-targets", action="store_true")
 
     doctor = sub.add_parser("doctor", help="check the local Phobos environment")
@@ -50,11 +57,16 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _target_url(target: str) -> str:
+    value = target.strip()
+    if not value:
+        raise ValueError("target must not be empty")
+    return value if "://" in value else f"https://{value}"
+
+
 def run_doctor(args: argparse.Namespace) -> int:
     checks: list[tuple[str, bool, str]] = []
-    checks.append(("Python >= 3.11", sys.version_info >= (3, 11), platform_python_version()))
-    nmap_path = shutil.which("nmap")
-    checks.append(("Nmap in PATH", nmap_path is not None, nmap_path or "not found"))
+    checks.append(("Python >= 3.11", sys.version_info >= (3, 11), _python_version()))
     api_key_set = bool(os.environ.get("VENICE_API_KEY", "").strip())
     checks.append(("VENICE_API_KEY set", api_key_set, "set" if api_key_set else "missing"))
     try:
@@ -74,17 +86,19 @@ def run_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
-def platform_python_version() -> str:
+def _python_version() -> str:
     return ".".join(str(part) for part in sys.version_info[:3])
 
 
-def run_scan(args: argparse.Namespace) -> int:
+def run_scan(args: argparse.Namespace, *, focus: str | None = None, plan_reason: str | None = None) -> int:
     config = ScanConfig.from_cli(
         args.target,
         tuple(args.scopes or ()),
         args.output,
         timeout=args.timeout,
         max_pages=args.max_pages,
+        max_discovered_urls=args.max_discovered_urls,
+        user_agent=args.user_agent,
         allow_private_targets=args.allow_private_targets,
     )
     scope = ScopeValidator(config.normalized_scopes, allow_private_targets=config.allow_private_targets)
@@ -92,7 +106,7 @@ def run_scan(args: argparse.Namespace) -> int:
         scope,
         timeout=config.timeout,
         max_redirects=config.max_redirects,
-        user_agent=args.user_agent,
+        user_agent=config.user_agent,
         max_response_bytes=config.max_response_bytes,
     )
     store = EvidenceStore(config.output_dir)
@@ -105,11 +119,22 @@ def run_scan(args: argparse.Namespace) -> int:
         metadata={"scopes": list(scope.allowed_domains)},
     )
     graph.add_node(id=website.id, type=website.type.value, label=website.name, attributes=website.metadata)
+
     print("[PHOBOS] Starting reconnaissance...")
     print(f"  Target: {config.target}")
-    print(f"  Scope:  {', '.join(scope.allowed_domains)}\n")
+    print(f"  Scope:  {', '.join(scope.allowed_domains)}")
+    if focus:
+        print(f"  Focus:  {focus}")
+    if plan_reason:
+        print(f"  Plan:   {plan_reason}")
+    print()
+
     try:
-        result = ReconCrawler(manager, max_pages=config.max_pages).crawl(config.target, graph=graph)
+        result = ReconCrawler(
+            manager,
+            max_pages=config.max_pages,
+            max_discovered_urls=config.max_discovered_urls,
+        ).crawl(config.target, graph=graph)
     except RequestError as exc:
         store.write_json(
             "scan.json",
@@ -118,6 +143,7 @@ def run_scan(args: argparse.Namespace) -> int:
                 "target": config.target,
                 "scopes": list(scope.allowed_domains),
                 "status": "failed",
+                "focus": focus,
                 "error": str(exc),
             },
         )
@@ -137,26 +163,34 @@ def run_scan(args: argparse.Namespace) -> int:
             "target": config.target,
             "scopes": list(scope.allowed_domains),
             "status": "complete",
+            "focus": focus,
             "summary": {
                 "pages": len(result.pages),
                 "forms": len(result.forms),
                 "inputs": len(result.inputs),
                 "endpoints": len(result.endpoints),
                 "javascript_files": len(result.javascript),
+                "ai_surfaces": len(result.ai_surfaces),
                 "errors": len(result.errors),
             },
-            "crawler": {"max_pages": config.max_pages},
+            "crawler": {
+                "max_pages": config.max_pages,
+                "max_discovered_urls": config.max_discovered_urls,
+            },
             "security": {"allow_private_targets": config.allow_private_targets},
+            "ai_plan": {"reason": plan_reason} if plan_reason else None,
         },
     )
     store.write_json("assets.json", [asset.to_dict() for asset in assets])
     store.write_json("graph.json", graph.to_dict())
     store.write_json("findings.json", [])
+
     print(f"✓ {len(result.pages)} pages discovered")
     print(f"✓ {len(result.forms)} forms discovered")
     print(f"✓ {len(result.inputs)} input parameters discovered")
     print(f"✓ {len(result.endpoints)} endpoints discovered")
     print(f"✓ {len(result.javascript)} JavaScript references discovered")
+    print(f"✓ {len(result.ai_surfaces)} likely AI surfaces discovered")
     if result.errors:
         print(f"! {len(result.errors)} recoverable errors")
     print(
@@ -168,42 +202,35 @@ def run_scan(args: argparse.Namespace) -> int:
 
 def run_ai(args: argparse.Namespace) -> int:
     request_text = " ".join(args.request).strip()
-    scopes = tuple(args.scopes or (args.target,))
+    target = _target_url(args.target)
+    parsed = urlparse(target)
+    scopes = tuple(args.scopes or (parsed.hostname or "",))
     scope = ScopeValidator(scopes, allow_private_targets=args.allow_private_targets)
 
     try:
-        target = args.target
-        validated_target = scope.validate(target if "://" in target else f"https://{target}")
+        validated_target = scope.validate(target)
         print("[PHOBOS AI] Sending request to Venice Uncensored...")
         decision = VeniceClient(AIConfig.from_env()).decide(request_text)
         print(f"  Action: {decision['action']}")
         print(f"  Reason: {decision['reason']}")
+
         if decision["action"] == "refuse":
             print("No supported action was requested.")
             return 0
-        if decision["action"] != "nmap_top_ports":
+        if decision["action"] not in {"web_recon", "ai_surface_discovery"}:
             print("✗ Unsupported AI action", file=sys.stderr)
             return 2
-
-        print(f"\n[PHOBOS] Prepared scoped nmap reconnaissance against {validated_target}...")
         if args.dry_run:
-            print("[DRY RUN] Nmap will NOT be executed.")
-            result = run_top_ports_scan(target, scope, timeout=args.timeout, execute=False)
-            print(f"\n$ {' '.join(result.command)}")
+            print("\n[DRY RUN] No web requests will be made.")
+            print(f"  Target: {validated_target}")
+            print(f"  Planned action: {decision['action']}")
             return 0
 
-        result = run_top_ports_scan(target, scope, timeout=args.timeout)
-        print(f"\n$ {' '.join(result.command)}")
-        if result.stdout:
-            print(result.stdout, end="")
-        if result.stderr:
-            print(result.stderr, end="", file=sys.stderr)
-        if result.returncode != 0:
-            print(f"✗ nmap exited with status {result.returncode}", file=sys.stderr)
-            return result.returncode if 1 <= result.returncode <= 125 else 2
-        print("✓ nmap completed successfully")
-        return 0
-    except (AIError, NmapError, ValueError) as exc:
+        args.target = validated_target
+        if decision["action"] == "ai_surface_discovery":
+            print("\n[PHOBOS AI] Running reconnaissance with AI-surface discovery focus...")
+        return run_scan(args, focus=decision["action"], plan_reason=decision["reason"])
+    except (AIError, RequestError, ValueError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
 

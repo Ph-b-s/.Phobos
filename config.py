@@ -1,7 +1,10 @@
-"""Scan configuration."""
+"""Validated scan configuration."""
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
+
 
 @dataclass(frozen=True, slots=True)
 class ScanConfig:
@@ -11,21 +14,59 @@ class ScanConfig:
     timeout: float = 10.0
     max_redirects: int = 5
     max_pages: int = 100
-    user_agent: str = "Phobos/0.1"
+    max_discovered_urls: int = 5_000
+    user_agent: str = "Phobos/0.2"
     max_response_bytes: int = 2_000_000
     allow_private_targets: bool = False
     headers: dict[str, str] = field(default_factory=dict)
+
     def __post_init__(self) -> None:
-        p = urlparse(self.target)
-        if p.scheme.lower() not in {"http", "https"} or not p.hostname: raise ValueError("target must be an absolute http(s) URL")
-        if self.timeout <= 0: raise ValueError("timeout must be positive")
-        if self.max_redirects < 0: raise ValueError("max_redirects cannot be negative")
-        if self.max_pages < 1: raise ValueError("max_pages must be at least 1")
-        if self.max_response_bytes <= 0: raise ValueError("max_response_bytes must be positive")
+        parsed = urlparse(self.target)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("target must be an absolute http(s) URL")
+        if parsed.username is not None or parsed.password is not None:
+            raise ValueError("target must not contain userinfo")
+        if self.timeout <= 0:
+            raise ValueError("timeout must be positive")
+        if not 0 <= self.max_redirects <= 20:
+            raise ValueError("max_redirects must be between 0 and 20")
+        if not 1 <= self.max_pages <= 10_000:
+            raise ValueError("max_pages must be between 1 and 10000")
+        if not self.max_pages <= self.max_discovered_urls <= 50_000:
+            raise ValueError("max_discovered_urls must be between max_pages and 50000")
+        if self.max_response_bytes <= 0:
+            raise ValueError("max_response_bytes must be positive")
+        if not self.user_agent.strip():
+            raise ValueError("user_agent must not be empty")
+
     @property
     def normalized_scopes(self) -> tuple[str, ...]:
         values = self.scopes or (urlparse(self.target).hostname or "",)
-        return tuple(sorted({v.strip().lower().rstrip(".") for v in values if v.strip()}))
+        normalized = {value.strip().lower().rstrip(".") for value in values if value.strip()}
+        if not normalized:
+            raise ValueError("at least one non-empty scope is required")
+        return tuple(sorted(normalized))
+
     @classmethod
-    def from_cli(cls, target: str, scopes: tuple[str, ...] = (), output_dir: str = ".phobos", *, timeout: float = 10.0, max_pages: int = 100, allow_private_targets: bool = False) -> "ScanConfig":
-        return cls(target, scopes, Path(output_dir), timeout, 5, max_pages, "Phobos/0.1", 2_000_000, allow_private_targets)
+    def from_cli(
+        cls,
+        target: str,
+        scopes: tuple[str, ...] = (),
+        output_dir: str = ".phobos",
+        *,
+        timeout: float = 10.0,
+        max_pages: int = 100,
+        max_discovered_urls: int = 5_000,
+        user_agent: str = "Phobos/0.2",
+        allow_private_targets: bool = False,
+    ) -> "ScanConfig":
+        return cls(
+            target=target,
+            scopes=scopes,
+            output_dir=Path(output_dir),
+            timeout=timeout,
+            max_pages=max_pages,
+            max_discovered_urls=max_discovered_urls,
+            user_agent=user_agent,
+            allow_private_targets=allow_private_targets,
+        )
