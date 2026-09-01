@@ -36,6 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--target", required=True, help="hostname or IP to scan; never chosen by the AI")
     agent.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
     agent.add_argument("--timeout", type=float, default=60.0, help="maximum nmap runtime in seconds")
+    agent.add_argument("--dry-run", action="store_true", help="ask the AI and show the fixed Nmap command without executing it")
     agent.add_argument("--allow-private-targets", action="store_true")
 
     return parser
@@ -144,12 +145,17 @@ def run_ai(args: argparse.Namespace) -> int:
         if decision["action"] == "refuse":
             print("No supported action was requested.")
             return 0
-
         if decision["action"] != "nmap_top_ports":
             print("✗ Unsupported AI action", file=sys.stderr)
             return 2
 
-        print(f"\n[PHOBOS] Executing scoped nmap reconnaissance against {validated_target}...")
+        print(f"\n[PHOBOS] Prepared scoped nmap reconnaissance against {validated_target}...")
+        if args.dry_run:
+            print("[DRY RUN] Nmap will NOT be executed.")
+            result = run_top_ports_scan(target, scope, timeout=args.timeout, execute=False)
+            print(f"\n$ {' '.join(result.command)}")
+            return 0
+
         result = run_top_ports_scan(target, scope, timeout=args.timeout)
         print(f"\n$ {' '.join(result.command)}")
         if result.stdout:
