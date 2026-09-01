@@ -4,7 +4,7 @@ from __future__ import annotations
 import argparse
 import sys
 
-from ai import AIConfig, AIError, OpenAIResponsesClient
+from ai import AIConfig, AIError, VeniceClient
 from config import ScanConfig
 from crawler import ReconCrawler
 from evidence import EvidenceStore
@@ -31,7 +31,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--user-agent", default="Phobos/0.1")
     scan.add_argument("--allow-private-targets", action="store_true")
 
-    agent = sub.add_parser("ai", help="ask the configured AI to select Phobos's safe nmap action")
+    agent = sub.add_parser("ai", help="ask Venice Uncensored to select Phobos's safe nmap action")
     agent.add_argument("request", nargs="+", help="natural-language request")
     agent.add_argument("--target", required=True, help="hostname or IP to scan; never chosen by the AI")
     agent.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
@@ -137,8 +137,8 @@ def run_ai(args: argparse.Namespace) -> int:
     try:
         target = args.target
         validated_target = scope.validate(target if "://" in target else f"https://{target}")
-        print("[PHOBOS AI] Sending request to AI planner...")
-        decision = OpenAIResponsesClient(AIConfig.from_env()).decide(request_text)
+        print("[PHOBOS AI] Sending request to Venice Uncensored...")
+        decision = VeniceClient(AIConfig.from_env()).decide(request_text)
         print(f"  Action: {decision['action']}")
         print(f"  Reason: {decision['reason']}")
         if decision["action"] == "refuse":
@@ -161,10 +161,7 @@ def run_ai(args: argparse.Namespace) -> int:
             return result.returncode if 1 <= result.returncode <= 125 else 2
         print("✓ nmap completed successfully")
         return 0
-    except (AIError, NmapError) as exc:
-        print(f"✗ {exc}", file=sys.stderr)
-        return 2
-    except ValueError as exc:
+    except (AIError, NmapError, ValueError) as exc:
         print(f"✗ {exc}", file=sys.stderr)
         return 2
 
