@@ -4,7 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http.client import HTTPResponse
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError, HTTPRedirectHandler, URLError
+from urllib.parse import urljoin
 from urllib.request import Request, build_opener
 
 from .scope import ScopeError, ScopeValidator
@@ -12,6 +13,25 @@ from .scope import ScopeError, ScopeValidator
 
 class RequestError(RuntimeError):
     """Raised when an HTTP request cannot be completed safely."""
+
+
+class _NoRedirectHandler(HTTPRedirectHandler):
+    """Prevent urllib from following redirects before Phobos validates them."""
+
+    def http_error_301(self, req, fp, code, msg, headers):
+        return fp
+
+    def http_error_302(self, req, fp, code, msg, headers):
+        return fp
+
+    def http_error_303(self, req, fp, code, msg, headers):
+        return fp
+
+    def http_error_307(self, req, fp, code, msg, headers):
+        return fp
+
+    def http_error_308(self, req, fp, code, msg, headers):
+        return fp
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,7 +67,7 @@ class RequestManager:
         self.max_redirects = max_redirects
         self.user_agent = user_agent
         self.max_response_bytes = max_response_bytes
-        self._opener = build_opener()
+        self._opener = build_opener(_NoRedirectHandler())
 
     def get(self, url: str, *, headers: dict[str, str] | None = None) -> HTTPResponseData:
         return self.request("GET", url, headers=headers)
@@ -65,7 +85,7 @@ class RequestManager:
         if headers:
             merged_headers.update(headers)
 
-        for _ in range(self.max_redirects + 1):
+        for redirect_count in range(self.max_redirects + 1):
             request = Request(current_url, data=body, method=method.upper(), headers=merged_headers)
             try:
                 response = self._opener.open(request, timeout=self.timeout)
@@ -76,22 +96,24 @@ class RequestManager:
             except TimeoutError as exc:
                 raise RequestError(f"request timed out for {current_url}") from exc
 
-            final_url = self._validate(response.geturl())
+            status = getattr(response, "status", response.getcode())
             location = response.headers.get("Location")
-            if location and response.status in {301, 302, 303, 307, 308}:
-                from urllib.parse import urljoin
+            final_url = self._validate(response.geturl())
 
-                next_url = urljoin(final_url, location)
-                self._validate(next_url)
+            if location and status in {301, 302, 303, 307, 308}:
+                if redirect_count >= self.max_redirects:
+                    raise RequestError(f"maximum redirects exceeded for {url}")
+                next_url = self._validate(urljoin(final_url, location))
                 current_url = next_url
-                method = "GET" if response.status == 303 else method
-                body = None if response.status == 303 else body
+                if status == 303 or (status in {301, 302} and method.upper() == "POST"):
+                    method = "GET"
+                    body = None
                 continue
 
             data = self._read_limited(response)
             return HTTPResponseData(
                 url=final_url,
-                status=response.status,
+                status=status,
                 headers={key.lower(): value for key, value in response.headers.items()},
                 body=data,
             )
