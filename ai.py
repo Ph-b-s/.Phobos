@@ -123,7 +123,7 @@ class VeniceClient:
         if not request_text:
             raise AIError("request must not be empty")
         if len(request_text) > MAX_REQUEST_CHARS:
-            raise AIError(f"request exceeds the {MAX_REQUEST_CHARS}-character limit")
+            raise AIError(f"request exceeds the {MAX_REQUEST_CHARS:,}-character limit")
         body = {
             "model": self.config.model,
             "messages": [
