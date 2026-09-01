@@ -28,6 +28,8 @@ def target_host(target: str) -> str:
         raise NmapError("target must be a hostname or IP address")
     if parsed.port is not None:
         raise NmapError("ports are not accepted in the target; Phobos controls scan scope")
+    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+        raise NmapError("target must not contain a path, query, or fragment")
     return parsed.hostname
 
 
