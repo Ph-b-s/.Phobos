@@ -32,8 +32,8 @@ class AIConfig:
 
     @classmethod
     def from_env(cls) -> "AIConfig":
-        base_url = os.environ.get("PHOBOS_AI_URL", cls.base_url).strip()
-        model = os.environ.get("PHOBOS_AI_MODEL", cls.model).strip()
+        base_url = os.environ.get("PHOBOS_AI_URL", DEFAULT_BASE_URL).strip()
+        model = os.environ.get("PHOBOS_AI_MODEL", MODEL_NAME).strip()
         api_key = os.environ.get("PHOBOS_AI_API_KEY", "").strip()
         if not base_url.startswith(("https://", "http://")):
             raise AIError("PHOBOS_AI_URL must be an http(s) URL")
