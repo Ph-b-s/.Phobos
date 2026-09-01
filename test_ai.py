@@ -95,12 +95,22 @@ def test_nmap_runner_uses_fixed_safe_command(monkeypatch: pytest.MonkeyPatch) ->
     }
 
 
-def test_nmap_dry_run_never_executes(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_nmap_dry_run_never_executes_or_requires_binary(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = ScopeValidator(("example.com",), allow_private_targets=True)
-    monkeypatch.setattr(nmap_runner.shutil, "which", lambda name: "/usr/bin/nmap")
+    monkeypatch.setattr(nmap_runner.shutil, "which", pytest.fail)
     monkeypatch.setattr(nmap_runner.subprocess, "run", pytest.fail)
     result = run_top_ports_scan("example.com", scope, execute=False)
     assert result.returncode == 0
+    assert result.command == (
+        "nmap",
+        "-sT",
+        "--top-ports",
+        "100",
+        "--open",
+        "--reason",
+        "--",
+        "example.com",
+    )
     assert result.stdout == ""
 
 
