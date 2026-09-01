@@ -1,4 +1,4 @@
-"""Safe, non-shell nmap execution for the first Phobos agent build."""
+"""Safe, non-shell Nmap execution for the first Phobos agent build."""
 from __future__ import annotations
 
 import shutil
@@ -10,7 +10,7 @@ from scope import ScopeError, ScopeValidator
 
 
 class NmapError(RuntimeError):
-    """Raised when nmap cannot be executed safely."""
+    """Raised when Nmap cannot be prepared or executed safely."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -33,19 +33,11 @@ def target_host(target: str) -> str:
     return parsed.hostname
 
 
-def run_top_ports_scan(
-    target: str,
-    scope: ScopeValidator,
-    *,
-    timeout: float = 60.0,
-) -> NmapResult:
-    if timeout <= 0:
-        raise NmapError("nmap timeout must be positive")
-
+def prepare_top_ports_scan(target: str, scope: ScopeValidator) -> tuple[str, ...]:
+    """Validate scope and return the fixed Nmap command without executing it."""
     host = target_host(target)
-    scope_url = f"https://{host}"
     try:
-        scope.validate(scope_url)
+        scope.validate(f"https://{host}")
     except ScopeError as exc:
         raise NmapError(str(exc)) from exc
 
@@ -53,7 +45,7 @@ def run_top_ports_scan(
     if not binary:
         raise NmapError("nmap was not found in PATH; install nmap on Kali Linux first")
 
-    command = (
+    return (
         binary,
         "-sT",
         "--top-ports",
@@ -63,6 +55,22 @@ def run_top_ports_scan(
         "--",
         host,
     )
+
+
+def run_top_ports_scan(
+    target: str,
+    scope: ScopeValidator,
+    *,
+    timeout: float = 60.0,
+    execute: bool = True,
+) -> NmapResult:
+    if timeout <= 0:
+        raise NmapError("nmap timeout must be positive")
+
+    command = prepare_top_ports_scan(target, scope)
+    if not execute:
+        return NmapResult(command=command, returncode=0, stdout="", stderr="")
+
     try:
         completed = subprocess.run(
             command,
@@ -81,4 +89,9 @@ def run_top_ports_scan(
     except OSError as exc:
         raise NmapError(f"could not execute nmap: {exc}") from exc
 
-    return NmapResult(command=command, returncode=completed.returncode, stdout=completed.stdout, stderr=completed.stderr)
+    return NmapResult(
+        command=command,
+        returncode=completed.returncode,
+        stdout=completed.stdout,
+        stderr=completed.stderr,
+    )
