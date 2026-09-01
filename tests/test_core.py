@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from phobos.cli.main import build_parser
 from phobos.core.config import ScanConfig
 from phobos.core.request_manager import RequestError, RequestManager
 from phobos.core.scope import ScopeValidator
@@ -62,3 +63,13 @@ def test_evidence_store_writes_json(tmp_path: Path) -> None:
     destination = store.write_json("scan.json", {"status": "complete"})
     assert destination.exists()
     assert destination.read_text(encoding="utf-8").strip().startswith("{")
+
+
+def test_cli_scan_parser() -> None:
+    args = build_parser().parse_args(
+        ["scan", "https://example.com", "--scope", "example.com", "--output", "results"]
+    )
+    assert args.command == "scan"
+    assert args.target == "https://example.com"
+    assert args.scopes == ["example.com"]
+    assert args.output == "results"
