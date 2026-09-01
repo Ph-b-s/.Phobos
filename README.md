@@ -57,8 +57,8 @@ CLI -> Configuration -> Scope Validator -> Request Manager
 Natural-language request
           |
           v
-  Dolphin Mistral 24B
-  Venice Edition (local)
+ Venice Uncensored
+ (Dolphin Mistral 24B)
           |
           v
   Structured decision
@@ -107,13 +107,13 @@ The model never receives shell access and never supplies the Nmap command or arb
 
 # How to run
 
-Phobos targets **Python 3.11+**. The AI-to-Nmap feature is designed to run from a Kali Linux terminal with Nmap installed and a local OpenAI-compatible inference server running the requested model.
+Phobos targets **Python 3.11+**. The AI-to-Nmap feature is designed to run from a Kali Linux terminal with Nmap installed and an internet connection for the Venice API.
 
-The selected model is:
+## AI model
 
-**`dphn/Dolphin-Mistral-24B-Venice-Edition`**
+Phobos uses **Dolphin Mistral 24B Venice Edition**, exposed by Venice.ai as **`venice-uncensored` / Venice Uncensored**. Venice documents an OpenAI-compatible Chat Completions API, so Phobos does not need a heavyweight SDK. The Hugging Face model card identifies the same Dolphin Mistral 24B Venice Edition as the model behind Venice Uncensored. [Hugging Face model card](https://huggingface.co/dphn/Dolphin-Mistral-24B-Venice-Edition) · [Venice API](https://venice.ai/venice-api) · [Venice Chat Completions docs](https://docs.venice.ai/api-reference/endpoint/chat/completions)
 
-The model card recommends vLLM for production-style inference and documents an OpenAI-compatible `/v1/chat/completions` endpoint. The base model is 24B parameters in BF16; the model documentation notes that the full model needs more than 60 GB of GPU memory when run on GPU. citeturn142148view0
+**No local model hosting is required.** The 24B model runs on Venice infrastructure and Phobos sends requests to Venice over HTTPS.
 
 ## 1. Clone and install Phobos
 
@@ -127,42 +127,36 @@ python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-Verify the CLI and Nmap:
+Verify the installation:
 
 ```bash
 phobos --help
 nmap --version
 ```
 
-## 2. Install and start Dolphin Mistral locally
+## 2. Get a Venice API key
 
-Install vLLM:
-
-```bash
-python -m pip install --upgrade vllm
-```
-
-Start the model server:
+Create a Venice API key in your Venice account and export it only in your shell session:
 
 ```bash
-vllm serve "dphn/Dolphin-Mistral-24B-Venice-Edition" \
-  --runner generate \
-  --port 8000 \
-  --tool-call-parser mistral \
-  --enable-auto-tool-choice \
-  --max-model-len 131072 \
-  --limit-mm-per-prompt '{"image": 10}'
+export VENICE_API_KEY="YOUR_VENICE_API_KEY"
 ```
 
-These launch parameters follow the model author's documented vLLM setup. citeturn142148view0
+Phobos reads the key from `VENICE_API_KEY`. It is not stored in the repository.
 
-Leave that terminal running. Phobos expects the local OpenAI-compatible endpoint at:
+The default API endpoint is:
 
 ```text
-http://127.0.0.1:8000/v1/chat/completions
+https://api.venice.ai/api/v1/chat/completions
 ```
 
-No OpenAI API key is required for the default local setup.
+The default model identifier is:
+
+```text
+venice-uncensored
+```
+
+Those defaults can be overridden with `PHOBOS_AI_URL` and `PHOBOS_AI_MODEL` for testing against another compatible endpoint, but the normal Phobos setup uses Venice Uncensored.
 
 ## 3. Run the AI + Nmap action
 
@@ -177,7 +171,7 @@ phobos ai \
 
 What happens:
 
-1. Phobos sends the natural-language request to the local Dolphin model.
+1. Phobos sends the natural-language request to Venice Uncensored.
 2. The model may return only `nmap_top_ports` or `refuse`.
 3. Phobos validates the explicit target against the explicit scope.
 4. Phobos constructs the Nmap command itself.
@@ -233,7 +227,7 @@ python -m pytest -q
 # Example output
 
 ```text
-[PHOBOS AI] Sending request to AI planner...
+[PHOBOS AI] Sending request to Venice Uncensored...
   Action: nmap_top_ports
   Reason: The request asks for the supported basic TCP reconnaissance action.
 
@@ -270,6 +264,8 @@ Phobos policy
  v
 Nmap
 ```
+
+The fact that the selected model is designed to be uncensored does **not** grant it system access. The execution boundary remains deterministic and controlled by Phobos.
 
 The web reconnaissance stack also uses centralized scope enforcement, bounded crawling, response-size limits, redirect validation, and a single outbound request manager.
 
@@ -344,7 +340,7 @@ The graph can be serialized to JSON so later security modules can operate on rel
 - [x] Initial HTML reconnaissance crawler
 - [x] Link, form, input, and JavaScript discovery
 - [x] Automated tests and CI foundation
-- [x] Local Dolphin Mistral AI planner
+- [x] Venice Uncensored AI planner
 - [x] Safe fixed-action Nmap runner
 
 ### Phase II — Deeper Reconnaissance
@@ -395,7 +391,7 @@ The crawler provides the data.
 
 The graph gives that data meaning.
 
-The local AI planner makes a constrained decision.
+The AI planner makes a constrained decision.
 
 The execution layer remains deterministic and policy-controlled.
 
