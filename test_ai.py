@@ -36,7 +36,7 @@ def test_target_host_rejects_ports_and_paths() -> None:
 
 
 def test_target_host_accepts_hostname() -> None:
-    assert target_host("https://Example.COM/") == "Example.COM"
+    assert target_host("https://Example.COM/") == "example.com"
 
 
 def test_nmap_runner_uses_fixed_safe_command(monkeypatch: pytest.MonkeyPatch) -> None:
