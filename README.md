@@ -2,11 +2,11 @@
 
 # PHOBOS
 
-### AI Security Reconnaissance & Attack-Surface Mapping
+### Web & AI Security Reconnaissance
 
 **Map the system before you attack the model.**
 
-Phobos is an open-source framework for authorized security testing of modern web applications, AI agents, APIs, tools, and the relationships between them.
+Phobos is an open-source framework for authorized security testing of modern web applications, APIs, AI agents, tools, and the relationships between them.
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![CI](https://img.shields.io/github/actions/workflow/status/Ph-b-s/.Phobos/test.yml?branch=flat-structure&style=flat-square&label=CI)](https://github.com/Ph-b-s/.Phobos/actions/workflows/test.yml)
@@ -19,10 +19,10 @@ Phobos is an open-source framework for authorized security testing of modern web
 [![Recon](https://img.shields.io/badge/capability-Reconnaissance-0891B2?style=flat-square)](#first-build)
 [![Web Crawling](https://img.shields.io/badge/web-Crawling-0F766E?style=flat-square)](#first-build)
 [![AI Agents](https://img.shields.io/badge/target-AI%20Agents-7C3AED?style=flat-square)](#what-phobos-is-building)
-[![Prompt Injection](https://img.shields.io/badge/testing-Prompt%20Injection-B91C1C?style=flat-square)](#roadmap)
+[![Prompt Injection](https://img.shields.io/badge/next-Prompt%20Injection-B91C1C?style=flat-square)](#roadmap)
 [![APIs](https://img.shields.io/badge/surface-APIs-F59E0B?style=flat-square)](#data-model)
 [![GitHub Stars](https://img.shields.io/github/stars/Ph-b-s/.Phobos?style=flat-square)](https://github.com/Ph-b-s/.Phobos/stargazers)
-[![Last Commit](https://img.shields.io/github/last-commit/Ph-b-s/.Phobos?style=flat-square)](https://github.com/Ph-b-s/.Phobos/commits/flat-structure)
+[![Last Commit](https://img.shields.io/github/last-commit/Ph-b-s/.Phobos/flat-structure?style=flat-square)](https://github.com/Ph-b-s/.Phobos/commits/flat-structure)
 
 </div>
 
@@ -30,7 +30,7 @@ Phobos is an open-source framework for authorized security testing of modern web
 
 ## What Phobos is building
 
-AI security is a system problem, not only a prompt problem. A useful security workflow needs to discover applications, APIs, inputs, agents, tools, and external resources, then preserve the relationships between them.
+AI security is a system problem, not only a prompt problem. A useful security workflow needs to discover applications, APIs, inputs, AI surfaces, agents, tools, and external resources, then preserve the relationships between them.
 
 Phobos is designed around this pipeline:
 
@@ -38,7 +38,7 @@ Phobos is designed around this pipeline:
 Discover → Normalize → Connect → Reason → Test → Correlate
 ```
 
-The current build focuses on the first foundation: **Phobos Core + Target Graph**, plus a tightly constrained AI-to-Nmap path.
+The current build focuses on the first foundation: **Phobos Core + Target Graph**, with passive AI-surface discovery built into web reconnaissance and an AI planner that selects only predefined Phobos actions.
 
 ---
 
@@ -57,11 +57,13 @@ Configuration → Scope Validator → Request Manager
                                       |
                                       v
                                Recon Crawler
-                             /      |       \
-                         Pages   Forms   Inputs / JS
-                             \      |      /
-                              v     v      v
+                             /      |        \
+                         Pages   Forms    Inputs / JS
+                             \      |        /
+                              v     v       v
                          Unified Asset Model
+                                  |
+                                  +----> AI Surface Detector
                                   |
                                   v
                             Execution Graph
@@ -70,7 +72,9 @@ Configuration → Scope Validator → Request Manager
                          JSON evidence artifacts
 ```
 
-### AI-to-Nmap
+The crawler discovers pages, links, forms, inputs, JavaScript references, and conservative signals for likely AI endpoints, AI providers, agent behavior, and AI-oriented inputs.
+
+### AI-assisted planning
 
 ```text
 Natural-language request
@@ -81,23 +85,20 @@ Natural-language request
           |
           v
   Structured decision
-      /          \
-  refuse      nmap_top_ports
-                  |
-                  v
-        Explicit target + scope
-                  |
-                  v
-          Scope Validator
-                  |
-                  v
-           Fixed Nmap runner
-                  |
-                  v
-       nmap -sT --top-ports 100 --open --reason
+   /       |          \
+refuse  web_recon  ai_surface_discovery
+            \          /
+             v        v
+          Explicit target + scope
+                   |
+                   v
+            Phobos policy layer
+                   |
+                   v
+           Fixed reconnaissance path
 ```
 
-The model never receives shell access, never chooses the target, and never supplies Nmap arguments. Phobos validates the explicit target and constructs the command itself.
+The model never chooses the target, never receives shell access, and never supplies arbitrary HTTP or command arguments. It only selects a predefined Phobos capability.
 
 ---
 
@@ -108,6 +109,7 @@ The project intentionally uses a flat source structure:
 ```text
 .Phobos/
 ├── ai.py
+├── ai_surface.py
 ├── cli.py
 ├── config.py
 ├── crawler.py
@@ -121,19 +123,18 @@ The project intentionally uses a flat source structure:
 ├── test_ai.py
 ├── test_core.py
 ├── test_recon.py
+├── test_recon_queue.py
 ├── pyproject.toml
 ├── ABOUT.md
 ├── README.md
 └── .github/workflows/test.yml
 ```
 
-Do not move the Python modules into a nested `phobos/` package unless the project architecture is deliberately changed later.
-
 ---
 
 # Installation
 
-Phobos requires **Python 3.11+**. The AI path requires internet access to Venice.ai. Real Nmap execution requires Nmap to be installed and available in `PATH`.
+Phobos requires **Python 3.11+**. The AI path requires internet access to Venice.ai.
 
 ## 1. Clone the correct branch
 
@@ -157,163 +158,25 @@ python -m pip install -e ".[dev]"
 phobos --version
 phobos --help
 phobos doctor
-nmap --version
 ```
 
-`phobos doctor` checks the Python version, Nmap availability, and Venice configuration without sending an AI request.
+`phobos doctor` checks the Python environment and Venice configuration without sending an AI request.
 
 ---
 
-# Exact usage
+# Usage
 
 There are currently **three commands**:
 
 ```text
-phobos scan     Web reconnaissance
-phobos ai       AI-planned fixed Nmap reconnaissance
+phobos scan     Passive web reconnaissance + AI-surface discovery
+phobos ai       AI-planned web reconnaissance
 phobos doctor   Local environment diagnostics
 ```
 
 Run `phobos <command> --help` for the authoritative command-line syntax.
 
-## A. AI + Nmap: recommended first run
-
-### Step 1 — configure Venice
-
-Create a Venice API key and export it in the shell running Phobos:
-
-```bash
-export VENICE_API_KEY="YOUR_VENICE_API_KEY"
-```
-
-Phobos does not store the key in the repository.
-
-Defaults:
-
-```text
-Endpoint: https://api.venice.ai/api/v1/chat/completions
-Model:    venice-uncensored
-```
-
-The model is Venice's Dolphin Mistral 24B Venice Edition exposed through the Venice API. No local 24B model is required.
-
-### Step 2 — run diagnostics
-
-```bash
-phobos doctor
-```
-
-A ready environment should show:
-
-```text
-✓ Python >= 3.11
-✓ Nmap in PATH
-✓ VENICE_API_KEY set
-✓ Venice endpoint uses HTTPS
-✓ AI model configured
-```
-
-### Step 3 — use dry-run before a real scan
-
-```bash
-phobos ai \
-  --target scanme.nmap.org \
-  --scope scanme.nmap.org \
-  --dry-run \
-  "Run a simple TCP reconnaissance scan of the target's common ports."
-```
-
-Dry-run performs the AI decision and scope validation but **never starts Nmap**. It prints the exact command Phobos would execute.
-
-### Step 4 — execute the fixed action
-
-```bash
-phobos ai \
-  --target scanme.nmap.org \
-  --scope scanme.nmap.org \
-  "Run a simple TCP reconnaissance scan of the target's common ports."
-```
-
-The execution path is:
-
-```text
-1. Validate the explicit target.
-2. Send the natural-language request to Venice.
-3. Accept only `nmap_top_ports` or `refuse`.
-4. Validate the explicit target against the explicit scope.
-5. Construct the fixed Nmap command inside Phobos.
-6. Execute with `shell=False` and a bounded timeout.
-7. Print Nmap stdout/stderr and its exit status.
-```
-
-The fixed command is:
-
-```text
-nmap -sT --top-ports 100 --open --reason -- TARGET_HOST
-```
-
-The AI cannot add switches, change ports, choose another host, execute a shell command, or start another program.
-
-### Target rules
-
-For `phobos ai`, `--target` must be a hostname or IP address. Do not pass a port, path, query string, or fragment.
-
-Valid:
-
-```bash
---target example.com
---target https://example.com/
---target 203.0.113.10
-```
-
-Invalid:
-
-```bash
---target example.com:8080
---target https://example.com/admin
-```
-
-### Scope rules
-
-Always prefer an explicit `--scope`:
-
-```bash
-phobos ai --target app.example.com --scope example.com --dry-run "Run basic TCP reconnaissance."
-```
-
-Subdomains are accepted under the scoped domain, while look-alike domains are rejected. Private/local destinations are blocked by default.
-
-For an authorized lab target on a private network, explicitly opt in:
-
-```bash
-phobos ai \
-  --target 192.168.56.10 \
-  --scope 192.168.56.10 \
-  --allow-private-targets \
-  --dry-run \
-  "Run basic TCP reconnaissance."
-```
-
-### Important behavior
-
-The AI request is limited to **4,000 characters**. Phobos rejects longer requests instead of silently truncating them.
-
-The AI response must be a JSON object with exactly these keys:
-
-```json
-{
-  "action": "nmap_top_ports",
-  "reason": "brief explanation"
-}
-```
-
-Anything else is rejected.
-
----
-
-## B. Web reconnaissance
-
-Run a scoped crawl against an HTTP(S) application:
+## A. Web reconnaissance
 
 ```bash
 phobos scan https://example.com --scope example.com
@@ -325,43 +188,77 @@ Increase the crawl budget when required:
 phobos scan https://app.example.com \
   --scope example.com \
   --max-pages 250 \
+  --max-discovered-urls 5000 \
   --timeout 15 \
   --output ./results
 ```
 
-Add more than one explicit scope when the application legitimately spans multiple domains:
+Results include pages, endpoints, forms, inputs, JavaScript references, and likely AI-related surfaces.
+
+## B. AI-assisted reconnaissance
+
+Configure Venice:
 
 ```bash
-phobos scan https://app.example.com \
+export VENICE_API_KEY="YOUR_VENICE_API_KEY"
+```
+
+Defaults:
+
+```text
+Endpoint: https://api.venice.ai/api/v1/chat/completions
+Model:    venice-uncensored
+```
+
+Ask Phobos to choose a predefined web-security action:
+
+```bash
+phobos ai \
+  --target https://app.example.com \
   --scope example.com \
-  --scope api.example.net
+  "Map the web surface and look for likely AI endpoints and agent entry points."
 ```
 
-The crawler currently focuses on pages, links, forms, inputs, endpoints, and JavaScript references. Results are written as JSON evidence.
-
----
-
-## C. Diagnostics
+Use dry-run to verify the AI decision without making web requests:
 
 ```bash
-phobos doctor
+phobos ai \
+  --target https://app.example.com \
+  --scope example.com \
+  --dry-run \
+  "Look for AI-related attack-surface signals."
 ```
 
-For scripts that only need an exit code:
+The AI can currently select only:
+
+```text
+web_recon
+ai_surface_discovery
+refuse
+```
+
+The target and scope remain under Phobos control.
+
+## Target and scope rules
+
+Targets must be HTTP(S) web URLs for the web-focused AI path. Private/local destinations are blocked by default.
+
+For an authorized lab target on a private network, explicitly opt in:
 
 ```bash
-phobos doctor --quiet
+phobos scan \
+  https://192.168.56.10 \
+  --scope 192.168.56.10 \
+  --allow-private-targets
 ```
 
-Exit code `0` means the local environment is ready. A non-zero code means at least one required check failed.
+The AI request is limited to **4,000 characters** and oversized requests are rejected rather than silently truncated.
 
 ---
 
 # Output files
 
 For `phobos scan`, the default directory is `.phobos/` unless `--output` is supplied.
-
-Typical artifacts:
 
 ```text
 .phobos/
@@ -371,7 +268,7 @@ Typical artifacts:
 └── findings.json
 ```
 
-`scan.json` contains the scan status and summary. `assets.json` contains normalized assets. `graph.json` contains graph nodes and relationships. `findings.json` is reserved for the later analysis layer and is currently empty in the first build.
+`scan.json` contains the scan status and summary. `assets.json` contains normalized assets. `graph.json` contains graph nodes and relationships. `findings.json` is reserved for the later analysis layer.
 
 ---
 
@@ -379,33 +276,32 @@ Typical artifacts:
 
 Phobos is intended for **authorized security testing only**. Obtain explicit authorization for systems you do not own before scanning them.
 
-The first build keeps the AI and execution layers separate:
+The core execution boundary is:
 
 ```text
-AI
- |
- | structured decision only
- v
-Phobos policy
- |
- +-- explicit target
- +-- explicit scope
- +-- fixed Nmap action
- +-- shell disabled
- |
- v
-Nmap
+Natural-language request
+          |
+          v
+        AI planner
+          |
+          | structured decision only
+          v
+      Phobos policy
+       /        \
+ target+scope   fixed action
+       \        /
+        v      v
+      Request Manager
+            |
+            v
+        Recon Crawler
 ```
 
-The web reconnaissance stack uses centralized scope enforcement, redirect validation, bounded crawling, response-size limits, and one outbound request manager.
+The web stack uses centralized scope enforcement, explicit redirect validation, bounded discovery, response-size limits, and a single outbound request manager.
 
 DNS resolution failures are treated as validation failures. Private/local destinations require explicit opt-in.
 
-### Public test target
-
-Nmap explicitly documents `scanme.nmap.org` as a target users may scan for testing purposes, with restrictions including Nmap-only testing and a bandwidth-conscious limit of about a dozen scans per day.
-
-Use that host only for the documented Nmap testing purpose; do not treat that permission as permission to exploit or otherwise attack the host.
+The first AI-security layer is intentionally passive. It identifies likely AI surfaces from already-fetched content; it does not execute prompts, alter application state, or invoke discovered tools.
 
 ---
 
@@ -427,16 +323,17 @@ resource
 database
 ```
 
-Example:
+AI-related assets currently include conservative signals such as:
 
-```json
-{
-  "id": "input_001",
-  "type": "input",
-  "name": "comment",
-  "url": "https://target.example/comments",
-  "confidence": 1.0
-}
+```text
+chat_completion_endpoint
+responses_endpoint
+message_endpoint
+generation_endpoint
+ai_api_endpoint
+provider_signal
+agent_signal
+ai_input
 ```
 
 ---
@@ -446,34 +343,33 @@ Example:
 ### Phase I — Core + Target Graph
 
 - [x] CLI
-- [x] Configuration
+- [x] Configuration validation
 - [x] Central scope enforcement
 - [x] Request manager
 - [x] Unified asset model
 - [x] In-memory execution graph
-- [x] Evidence storage
+- [x] Atomic evidence storage
 - [x] HTML reconnaissance crawler
 - [x] Link, form, input, endpoint, and JavaScript discovery
+- [x] Bounded discovery queue
+- [x] Passive AI-surface discovery
 - [x] Automated tests and CI
 - [x] Venice Uncensored AI planner
-- [x] Fixed-action Nmap runner
-- [x] AI dry-run mode
-- [x] Local environment diagnostics
 
-### Phase II — Deeper Reconnaissance
+### Phase II — Deeper Web Reconnaissance
 
-- [ ] API endpoint discovery
 - [ ] JavaScript endpoint extraction
 - [ ] robots.txt / sitemap awareness
-- [ ] Content and technology fingerprinting
-- [ ] Authentication-aware crawling
+- [ ] technology fingerprinting
+- [ ] authentication-aware crawling
 - [ ] richer evidence capture
+- [ ] API schema discovery
 
-### Phase III — AI Surface Discovery
+### Phase III — AI Surface Analysis
 
-- [ ] AI-agent surface detection
-- [ ] Chat / completion endpoint detection
-- [ ] Streaming response detection
+- [ ] AI-agent surface detection improvements
+- [ ] Chat / completion endpoint classification
+- [ ] streaming response detection
 - [ ] tool-use detection
 - [ ] model/provider fingerprinting
 - [ ] agent → tool → resource relationships
@@ -506,6 +402,6 @@ The project is currently in early development and does not yet declare a final o
 
 <div align="center">
 
-**PHOBOS — map the attack surface before you attack the model.**
+**PHOBOS — map the system before you attack the model.**
 
 </div>
