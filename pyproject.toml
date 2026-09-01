@@ -16,6 +16,21 @@ dev = ["pytest>=8"]
 [project.scripts]
 phobos = "cli:main"
 
+[tool.setuptools]
+py-modules = [
+    "ai",
+    "cli",
+    "config",
+    "crawler",
+    "evidence",
+    "graph",
+    "models",
+    "nodes",
+    "nmap_runner",
+    "request_manager",
+    "scope",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["."]
 python_files = ["test_*.py"]
