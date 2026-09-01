@@ -85,18 +85,34 @@ def test_nmap_runner_blocks_out_of_scope_host(monkeypatch: pytest.MonkeyPatch) -
         run_top_ports_scan("evil-example.com", scope)
 
 
-def test_ai_config_defaults_to_dolphin_mistral() -> None:
+def test_ai_config_defaults_to_venice_uncensored(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VENICE_API_KEY", "test-key")
     config = ai.AIConfig.from_env()
-    assert config.model == "dphn/Dolphin-Mistral-24B-Venice-Edition"
-    assert config.base_url == "http://127.0.0.1:8000/v1/chat/completions"
+    assert config.model == "venice-uncensored"
+    assert config.base_url == "https://api.venice.ai/api/v1/chat/completions"
+    assert config.api_key == "test-key"
 
 
-def test_ai_config_allows_local_endpoint_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("PHOBOS_AI_URL", "http://127.0.0.1:9000/v1/chat/completions")
+def test_ai_config_requires_venice_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("VENICE_API_KEY", raising=False)
+    with pytest.raises(ai.AIError, match="VENICE_API_KEY"):
+        ai.AIConfig.from_env()
+
+
+def test_ai_config_allows_https_endpoint_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VENICE_API_KEY", "test-key")
+    monkeypatch.setenv("PHOBOS_AI_URL", "https://proxy.example/v1/chat/completions")
     monkeypatch.setenv("PHOBOS_AI_MODEL", "custom-model")
     config = ai.AIConfig.from_env()
-    assert config.base_url == "http://127.0.0.1:9000/v1/chat/completions"
+    assert config.base_url == "https://proxy.example/v1/chat/completions"
     assert config.model == "custom-model"
+
+
+def test_ai_config_rejects_http_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("VENICE_API_KEY", "test-key")
+    monkeypatch.setenv("PHOBOS_AI_URL", "http://127.0.0.1:8000/v1/chat/completions")
+    with pytest.raises(ai.AIError, match="https"):
+        ai.AIConfig.from_env()
 
 
 def test_response_text_supports_openai_compatible_shape() -> None:
