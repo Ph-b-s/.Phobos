@@ -5,12 +5,13 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "phobos-ai-security"
 version = "0.1.0"
-description = "Modular framework for authorized AI security testing"
+description = "Core reconnaissance and attack-surface graph for authorized AI security testing"
 requires-python = ">=3.11"
 readme = "README.md"
+dependencies = []
 
 [tool.setuptools.packages.find]
 include = ["phobos*"]
 
 [project.scripts]
-phobos = "phobos.cli:main"
+phobos = "phobos.cli.main:main"
