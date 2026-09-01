@@ -6,21 +6,22 @@ import argparse
 import sys
 
 from phobos.core.config import ScanConfig
-from phobos.core.request_manager import RequestError, RequestManager
 from phobos.core.models import Asset, AssetType
+from phobos.core.request_manager import RequestManager, RequestError
 from phobos.core.scope import ScopeValidator
 from phobos.graph.graph import Graph
+from phobos.recon.crawler import ReconCrawler
 from phobos.storage.evidence import EvidenceStore
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="phobos",
-        description="Phobos — authorized AI security reconnaissance framework",
+        description="Phobos — scoped reconnaissance and attack-surface mapping for authorized security testing.",
     )
     subcommands = parser.add_subparsers(dest="command")
 
-    scan = subcommands.add_parser("scan", help="start a scoped reconnaissance scan")
+    scan = subcommands.add_parser("scan", help="run a scoped reconnaissance scan")
     scan.add_argument("target", help="absolute http(s) target URL")
     scan.add_argument(
         "--scope",
@@ -31,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     scan.add_argument("--output", default=".phobos", help="scan output directory")
     scan.add_argument("--timeout", type=float, default=10.0, help="HTTP timeout in seconds")
+    scan.add_argument("--max-pages", type=int, default=100, help="maximum pages to crawl")
     scan.add_argument("--user-agent", default="Phobos/0.1", help="HTTP User-Agent")
     return parser
 
@@ -59,14 +61,20 @@ def run_scan(args: argparse.Namespace) -> int:
         url=config.target,
         metadata={"scopes": list(scope.allowed_domains)},
     )
-    graph.add_node(id=website.id, type=website.type.value, label=website.name, attributes=website.metadata)
+    graph.add_node(
+        id=website.id,
+        type=website.type.value,
+        label=website.name,
+        attributes=website.metadata,
+    )
 
     print("[PHOBOS] Starting reconnaissance...")
     print(f"  Target: {config.target}")
     print(f"  Scope:  {', '.join(scope.allowed_domains)}")
+    print()
 
     try:
-        response = request_manager.get(config.target)
+        result = ReconCrawler(request_manager, max_pages=args.max_pages).crawl(config.target, graph=graph)
     except RequestError as exc:
         store.write_json(
             "scan.json",
@@ -83,35 +91,39 @@ def run_scan(args: argparse.Namespace) -> int:
         print(f"✗ Scan stopped: {exc}", file=sys.stderr)
         return 2
 
-    page = Asset(
-        id="page_001",
-        type=AssetType.PAGE,
-        name=response.url,
-        url=response.url,
-        metadata={"status_code": response.status, "content_type": response.headers.get("content-type", "")},
-    )
-    graph.add_node(id=page.id, type=page.type.value, label=page.name, attributes=page.metadata)
-    graph.add_edge(source=website.id, target=page.id, relationship="hosts")
+    for page in result.pages:
+        graph.add_edge(source=website.id, target=page.id, relationship="hosts")
 
+    assets = [website, *result.assets]
     store.write_json(
         "scan.json",
         {
+            "schema_version": "1.0",
             "target": config.target,
             "scopes": list(scope.allowed_domains),
             "status": "complete",
-            "http": {"url": response.url, "status": response.status},
-            "summary": {"pages": 1, "forms": 0, "inputs": 0, "api_endpoints": 0, "javascript_files": 0},
+            "summary": {
+                "pages": len(result.pages),
+                "forms": len(result.forms),
+                "inputs": len(result.inputs),
+                "api_endpoints": 0,
+                "javascript_files": len(result.javascript),
+                "errors": len(result.errors),
+            },
+            "crawler": {"max_pages": args.max_pages},
         },
     )
+    store.write_json("assets.json", [asset.to_dict() for asset in assets])
     store.write_json("graph.json", graph.to_dict())
-    store.write_json("assets.json", [website.to_dict(), page.to_dict()])
     store.write_json("findings.json", [])
 
-    print("✓ 1 page discovered")
-    print("✓ 0 forms discovered")
-    print("✓ 0 input parameters discovered")
+    print(f"✓ {len(result.pages)} pages discovered")
+    print(f"✓ {len(result.forms)} forms discovered")
+    print(f"✓ {len(result.inputs)} input parameters discovered")
     print("✓ 0 API endpoints discovered")
-    print("✓ 0 JavaScript files analyzed")
+    print(f"✓ {len(result.javascript)} JavaScript files analyzed")
+    if result.errors:
+        print(f"! {len(result.errors)} recoverable errors")
     print()
     print("Building execution graph...")
     print()
