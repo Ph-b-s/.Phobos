@@ -8,9 +8,17 @@
 
 Phobos is an open-source framework for authorized security testing of modern web applications, AI agents, APIs, tools, and the relationships between them.
 
-[![Python](https://img.shields.io/badge/python-3.11%2B-111827?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-TBD-111827?style=flat-square)](#license)
-[![Status](https://img.shields.io/badge/status-first%20build-111827?style=flat-square)](#first-build)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![CI](https://img.shields.io/github/actions/workflow/status/Ph-b-s/.Phobos/test.yml?branch=flat-structure&style=flat-square&label=CI)](https://github.com/Ph-b-s/.Phobos/actions/workflows/test.yml)
+[![License](https://img.shields.io/badge/license-TBD-lightgrey?style=flat-square)](#license)
+[![Status](https://img.shields.io/badge/status-early%20development-orange?style=flat-square)](#roadmap)
+[![AI Security](https://img.shields.io/badge/focus-AI%20security-red?style=flat-square)](#what-phobos-is-building)
+[![Red Team](https://img.shields.io/badge/security-red%20teaming-darkred?style=flat-square)](#security-model)
+[![Recon](https://img.shields.io/badge/capability-reconnaissance-blue?style=flat-square)](#first-build)
+[![Nmap](https://img.shields.io/badge/engine-Nmap-4682B4?style=flat-square&logo=nmap&logoColor=white)](https://nmap.org/)
+[![Venice AI](https://img.shields.io/badge/AI-Venice%20Uncensored-purple?style=flat-square)](https://venice.ai/)
+[![GitHub Stars](https://img.shields.io/github/stars/Ph-b-s/.Phobos?style=flat-square)](https://github.com/Ph-b-s/.Phobos/stargazers)
+[![Last Commit](https://img.shields.io/github/last-commit/Ph-b-s/.Phobos?style=flat-square)](https://github.com/Ph-b-s/.Phobos/commits/flat-structure)
 
 </div>
 
@@ -47,7 +55,7 @@ Configuration → Scope Validator → Request Manager
                                Recon Crawler
                              /      |       \
                          Pages   Forms   Inputs / JS
-                             \      |       /
+                             \      |      /
                               v     v      v
                          Unified Asset Model
                                   |
