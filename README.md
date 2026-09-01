@@ -137,10 +137,10 @@ Evidence / JSON artifacts
 │   │   ├── config.py            # Scan configuration
 │   │   ├── scope.py             # Central scope enforcement
 │   │   ├── request_manager.py   # Single outbound HTTP boundary
-│   │   └── models.py             # Unified asset / finding models
+│   │   └── models.py            # Unified asset / finding models
 │   │
 │   ├── recon/
-│   │   └── crawler.py            # Bounded HTML reconnaissance
+│   │   └── crawler.py           # Bounded HTML reconnaissance
 │   │
 │   ├── graph/
 │   │   ├── graph.py             # In-memory directed graph
@@ -188,7 +188,7 @@ input
 api
 javascript
 ai_agent
- tool
+tool
 resource
 database
 ```
