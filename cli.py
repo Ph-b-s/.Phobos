@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import argparse
+import os
+import shutil
 import sys
 
 from ai import AIConfig, AIError, VeniceClient
@@ -14,12 +16,15 @@ from nmap_runner import NmapError, run_top_ports_scan
 from request_manager import RequestError, RequestManager
 from scope import ScopeValidator
 
+PHOBOS_VERSION = "0.1.1"
+
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="phobos",
         description="Phobos — scoped AI security reconnaissance and attack-surface mapping.",
     )
+    parser.add_argument("--version", action="version", version=f"Phobos {PHOBOS_VERSION}")
     sub = parser.add_subparsers(dest="command")
 
     scan = sub.add_parser("scan", help="run a scoped web reconnaissance scan")
@@ -39,7 +44,38 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--dry-run", action="store_true", help="ask the AI and show the fixed Nmap command without executing it")
     agent.add_argument("--allow-private-targets", action="store_true")
 
+    doctor = sub.add_parser("doctor", help="check the local Phobos environment")
+    doctor.add_argument("--quiet", action="store_true", help="only return the diagnostic exit code")
+
     return parser
+
+
+def run_doctor(args: argparse.Namespace) -> int:
+    checks: list[tuple[str, bool, str]] = []
+    checks.append(("Python >= 3.11", sys.version_info >= (3, 11), platform_python_version()))
+    nmap_path = shutil.which("nmap")
+    checks.append(("Nmap in PATH", nmap_path is not None, nmap_path or "not found"))
+    api_key_set = bool(os.environ.get("VENICE_API_KEY", "").strip())
+    checks.append(("VENICE_API_KEY set", api_key_set, "set" if api_key_set else "missing"))
+    try:
+        config = AIConfig.from_env()
+        checks.append(("Venice endpoint uses HTTPS", True, config.base_url))
+        checks.append(("AI model configured", True, config.model))
+    except AIError as exc:
+        checks.append(("Venice configuration", False, str(exc)))
+
+    ok = all(result for _, result, _ in checks)
+    if not args.quiet:
+        print("[PHOBOS] Environment diagnostics")
+        for label, passed, detail in checks:
+            mark = "✓" if passed else "✗"
+            print(f"{mark} {label}: {detail}")
+        print("\n✓ Environment looks ready." if ok else "\n✗ Environment is not ready.")
+    return 0 if ok else 1
+
+
+def platform_python_version() -> str:
+    return ".".join(str(part) for part in sys.version_info[:3])
 
 
 def run_scan(args: argparse.Namespace) -> int:
@@ -179,6 +215,8 @@ def main(argv: list[str] | None = None) -> int:
         return run_scan(args)
     if args.command == "ai":
         return run_ai(args)
+    if args.command == "doctor":
+        return run_doctor(args)
     parser.print_help()
     return 0
 

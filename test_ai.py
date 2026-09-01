@@ -23,6 +23,21 @@ def test_parse_decision_rejects_arbitrary_action() -> None:
         ai._parse_decision('{"action":"shell","reason":"run anything"}')
 
 
+def test_parse_decision_rejects_extra_fields() -> None:
+    with pytest.raises(ai.AIError, match="exactly action and reason"):
+        ai._parse_decision('{"action":"refuse","reason":"no","extra":"bad"}')
+
+
+def test_parse_decision_rejects_missing_reason() -> None:
+    with pytest.raises(ai.AIError, match="exactly action and reason"):
+        ai._parse_decision('{"action":"refuse"}')
+
+
+def test_parse_decision_rejects_empty_reason() -> None:
+    with pytest.raises(ai.AIError, match="reason must not be empty"):
+        ai._parse_decision('{"action":"refuse","reason":"   "}')
+
+
 def test_parse_decision_handles_markdown_json() -> None:
     result = ai._parse_decision('```json\n{"action":"refuse","reason":"unsupported"}\n```')
     assert result["action"] == "refuse"
@@ -33,7 +48,7 @@ def test_parse_decision_rejects_non_object() -> None:
         ai._parse_decision('[{"action":"nmap_top_ports"}]')
 
 
-def test_parse_decision_rejects_missing_reason_type() -> None:
+def test_parse_decision_rejects_invalid_reason_type() -> None:
     with pytest.raises(ai.AIError):
         ai._parse_decision('{"action":"refuse","reason":123}')
 
@@ -58,7 +73,6 @@ def test_nmap_prepare_is_side_effect_free(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_nmap_runner_uses_fixed_safe_command(monkeypatch: pytest.MonkeyPatch) -> None:
     scope = ScopeValidator(("scanme.nmap.org",), allow_private_targets=True)
-
     monkeypatch.setattr(nmap_runner.shutil, "which", lambda name: "/usr/bin/nmap")
     captured: dict[str, object] = {}
 
@@ -206,3 +220,9 @@ def test_ai_client_rejects_oversized_response(monkeypatch: pytest.MonkeyPatch) -
     client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
     with pytest.raises(ai.AIError, match="size limit"):
         client.decide("test")
+
+
+def test_ai_client_rejects_oversized_request() -> None:
+    client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
+    with pytest.raises(ai.AIError, match="4,000-character limit"):
+        client.decide("x" * (ai.MAX_REQUEST_CHARS + 1))

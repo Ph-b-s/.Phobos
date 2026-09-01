@@ -16,25 +16,32 @@ Phobos is an open-source framework for authorized security testing of modern web
 
 ---
 
-## Why Phobos exists
+## What Phobos is building
 
-AI security is rarely a single prompt sent to a single model. A real target is a connected system of web applications, APIs, stored content, AI agents, tools, and external resources.
+AI security is a system problem, not only a prompt problem. A useful security workflow needs to discover applications, APIs, inputs, agents, tools, and external resources, then preserve the relationships between them.
 
-Phobos is being built to discover that system, normalize it into assets, connect those assets in a graph, and eventually reason about attack paths across components.
+Phobos is designed around this pipeline:
+
+```text
+Discover → Normalize → Connect → Reason → Test → Correlate
+```
+
+The current build focuses on the first foundation: **Phobos Core + Target Graph**, plus a tightly constrained AI-to-Nmap path.
 
 ---
 
 ## First build
 
-The first build establishes the **Phobos Core + Target Graph** foundation and a deliberately constrained AI-to-Nmap execution path.
-
-### Web reconnaissance flow
+### Web reconnaissance
 
 ```text
 Target URL
     |
     v
-CLI -> Configuration -> Scope Validator -> Request Manager
+CLI
+    |
+    v
+Configuration → Scope Validator → Request Manager
                                       |
                                       v
                                Recon Crawler
@@ -51,7 +58,7 @@ CLI -> Configuration -> Scope Validator -> Request Manager
                          JSON evidence artifacts
 ```
 
-### AI-to-Nmap flow
+### AI-to-Nmap
 
 ```text
 Natural-language request
@@ -75,150 +82,242 @@ Natural-language request
            Fixed Nmap runner
                   |
                   v
-       nmap -sT --top-ports 100
+       nmap -sT --top-ports 100 --open --reason
 ```
 
-The model never receives shell access and never supplies the Nmap command or arbitrary arguments. Phobos performs the policy decision and constructs the executable command itself.
-
-### Repository architecture
-
-```text
-.Phobos/
-├── cli.py
-├── config.py
-├── scope.py
-├── request_manager.py
-├── models.py
-├── crawler.py
-├── graph.py
-├── nodes.py
-├── evidence.py
-├── ai.py
-├── nmap_runner.py
-├── test_core.py
-├── test_recon.py
-├── test_ai.py
-├── .github/workflows/test.yml
-├── pyproject.toml
-└── README.md
-```
+The model never receives shell access, never chooses the target, and never supplies Nmap arguments. Phobos validates the explicit target and constructs the command itself.
 
 ---
 
-# How to run
+## Repository layout
 
-Phobos targets **Python 3.11+**. The AI-to-Nmap feature runs from a Kali Linux terminal with Nmap installed and an internet connection for the Venice API.
+The project intentionally uses a flat source structure:
 
-## AI model
+```text
+.Phobos/
+├── ai.py
+├── cli.py
+├── config.py
+├── crawler.py
+├── evidence.py
+├── graph.py
+├── models.py
+├── nodes.py
+├── nmap_runner.py
+├── request_manager.py
+├── scope.py
+├── test_ai.py
+├── test_core.py
+├── test_recon.py
+├── pyproject.toml
+├── ABOUT.md
+├── README.md
+└── .github/workflows/test.yml
+```
 
-Phobos uses **Dolphin Mistral 24B Venice Edition**, exposed by Venice.ai as **`venice-uncensored` / Venice Uncensored**. The integration uses Venice's OpenAI-compatible Chat Completions interface through Python's standard library; no model is hosted locally by Phobos.
+Do not move the Python modules into a nested `phobos/` package unless the project architecture is deliberately changed later.
 
-## 1. Clone and install Phobos
+---
+
+# Installation
+
+Phobos requires **Python 3.11+**. The AI path requires internet access to Venice.ai. Real Nmap execution requires Nmap to be installed and available in `PATH`.
+
+## 1. Clone the correct branch
 
 ```bash
 git clone -b flat-structure https://github.com/Ph-b-s/.Phobos.git
 cd .Phobos
+```
 
+## 2. Create the virtual environment
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
-Verify the installation:
+## 3. Verify the local installation
 
 ```bash
+phobos --version
 phobos --help
+phobos doctor
 nmap --version
 ```
 
-## 2. Get a Venice API key
+`phobos doctor` checks the Python version, Nmap availability, and Venice configuration without sending an AI request.
 
-Create a Venice API key in your Venice account and export it only in your shell session:
+---
+
+# Exact usage
+
+There are currently **three commands**:
+
+```text
+phobos scan     Web reconnaissance
+phobos ai       AI-planned fixed Nmap reconnaissance
+phobos doctor   Local environment diagnostics
+```
+
+Run `phobos <command> --help` for the authoritative command-line syntax.
+
+## A. AI + Nmap: recommended first run
+
+### Step 1 — configure Venice
+
+Create a Venice API key and export it in the shell running Phobos:
 
 ```bash
 export VENICE_API_KEY="YOUR_VENICE_API_KEY"
 ```
 
-Phobos reads the key from `VENICE_API_KEY`. It is not stored in the repository.
+Phobos does not store the key in the repository.
 
-The default API endpoint is:
-
-```text
-https://api.venice.ai/api/v1/chat/completions
-```
-
-The default model identifier is:
+Defaults:
 
 ```text
-venice-uncensored
+Endpoint: https://api.venice.ai/api/v1/chat/completions
+Model:    venice-uncensored
 ```
 
-## 3. Test the AI path without executing Nmap
+The model is Venice's Dolphin Mistral 24B Venice Edition exposed through the Venice API. No local 24B model is required.
 
-For a safe first run, use `--dry-run`. Phobos still validates the explicit target and scope, asks Venice for the decision, and prints the exact fixed command that would be executed.
+### Step 2 — run diagnostics
+
+```bash
+phobos doctor
+```
+
+A ready environment should show:
+
+```text
+✓ Python >= 3.11
+✓ Nmap in PATH
+✓ VENICE_API_KEY set
+✓ Venice endpoint uses HTTPS
+✓ AI model configured
+```
+
+### Step 3 — use dry-run before a real scan
 
 ```bash
 phobos ai \
   --target scanme.nmap.org \
   --scope scanme.nmap.org \
   --dry-run \
-  "Run a simple Nmap reconnaissance scan of the target's common TCP ports."
+  "Run a simple TCP reconnaissance scan of the target's common ports."
 ```
 
-`--dry-run` never starts Nmap.
+Dry-run performs the AI decision and scope validation but **never starts Nmap**. It prints the exact command Phobos would execute.
 
-## 4. Run the AI + Nmap action
-
-Use a target you own or are explicitly authorized to assess.
+### Step 4 — execute the fixed action
 
 ```bash
 phobos ai \
   --target scanme.nmap.org \
   --scope scanme.nmap.org \
-  "Run a simple Nmap reconnaissance scan of the target's common TCP ports."
+  "Run a simple TCP reconnaissance scan of the target's common ports."
 ```
 
-What happens:
+The execution path is:
 
-1. Phobos sends the natural-language request to Venice Uncensored.
-2. The model may return only `nmap_top_ports` or `refuse`.
-3. Phobos validates the explicit target against the explicit scope.
-4. Phobos constructs the Nmap command itself.
-5. Nmap executes with `shell=False`, a fixed argument set, and a timeout.
-6. The Nmap result is printed in the terminal.
+```text
+1. Validate the explicit target.
+2. Send the natural-language request to Venice.
+3. Accept only `nmap_top_ports` or `refuse`.
+4. Validate the explicit target against the explicit scope.
+5. Construct the fixed Nmap command inside Phobos.
+6. Execute with `shell=False` and a bounded timeout.
+7. Print Nmap stdout/stderr and its exit status.
+```
 
-The model cannot choose a different host, add arbitrary Nmap switches, inject shell syntax, or execute another program.
+The fixed command is:
 
-### Private/local targets
+```text
+nmap -sT --top-ports 100 --open --reason -- TARGET_HOST
+```
 
-Private destinations are blocked by default. For an explicitly authorized local lab target, opt in:
+The AI cannot add switches, change ports, choose another host, execute a shell command, or start another program.
+
+### Target rules
+
+For `phobos ai`, `--target` must be a hostname or IP address. Do not pass a port, path, query string, or fragment.
+
+Valid:
+
+```bash
+--target example.com
+--target https://example.com/
+--target 203.0.113.10
+```
+
+Invalid:
+
+```bash
+--target example.com:8080
+--target https://example.com/admin
+```
+
+### Scope rules
+
+Always prefer an explicit `--scope`:
+
+```bash
+phobos ai --target app.example.com --scope example.com --dry-run "Run basic TCP reconnaissance."
+```
+
+Subdomains are accepted under the scoped domain, while look-alike domains are rejected. Private/local destinations are blocked by default.
+
+For an authorized lab target on a private network, explicitly opt in:
 
 ```bash
 phobos ai \
   --target 192.168.56.10 \
   --scope 192.168.56.10 \
   --allow-private-targets \
-  "Run a simple Nmap reconnaissance scan."
+  --dry-run \
+  "Run basic TCP reconnaissance."
 ```
 
-## 5. Run web reconnaissance
+### Important behavior
+
+The AI request is limited to **4,000 characters**. Phobos rejects longer requests instead of silently truncating them.
+
+The AI response must be a JSON object with exactly these keys:
+
+```json
+{
+  "action": "nmap_top_ports",
+  "reason": "brief explanation"
+}
+```
+
+Anything else is rejected.
+
+---
+
+## B. Web reconnaissance
+
+Run a scoped crawl against an HTTP(S) application:
 
 ```bash
 phobos scan https://example.com --scope example.com
 ```
 
-Useful options:
+Increase the crawl budget when required:
 
 ```bash
-phobos scan https://example.com \
+phobos scan https://app.example.com \
   --scope example.com \
   --max-pages 250 \
   --timeout 15 \
   --output ./results
 ```
 
-Multiple scopes can be supplied explicitly:
+Add more than one explicit scope when the application legitimately spans multiple domains:
 
 ```bash
 phobos scan https://app.example.com \
@@ -226,38 +325,49 @@ phobos scan https://app.example.com \
   --scope api.example.net
 ```
 
-## 6. Run the test suite
-
-```bash
-python -m pytest -q
-```
+The crawler currently focuses on pages, links, forms, inputs, endpoints, and JavaScript references. Results are written as JSON evidence.
 
 ---
 
-# Example output
+## C. Diagnostics
 
-```text
-[PHOBOS AI] Sending request to Venice Uncensored...
-  Action: nmap_top_ports
-  Reason: The request asks for the supported basic TCP reconnaissance action.
-
-[PHOBOS] Prepared scoped nmap reconnaissance against https://scanme.nmap.org...
-
-$ /usr/bin/nmap -sT --top-ports 100 --open --reason -- scanme.nmap.org
-Starting Nmap ...
-...
-✓ nmap completed successfully
+```bash
+phobos doctor
 ```
 
-The exact output depends on the target and local Nmap installation.
+For scripts that only need an exit code:
+
+```bash
+phobos doctor --quiet
+```
+
+Exit code `0` means the local environment is ready. A non-zero code means at least one required check failed.
+
+---
+
+# Output files
+
+For `phobos scan`, the default directory is `.phobos/` unless `--output` is supplied.
+
+Typical artifacts:
+
+```text
+.phobos/
+├── scan.json
+├── assets.json
+├── graph.json
+└── findings.json
+```
+
+`scan.json` contains the scan status and summary. `assets.json` contains normalized assets. `graph.json` contains graph nodes and relationships. `findings.json` is reserved for the later analysis layer and is currently empty in the first build.
 
 ---
 
 # Security model
 
-Phobos is intended for **authorized security testing only**.
+Phobos is intended for **authorized security testing only**. Obtain explicit authorization for systems you do not own before scanning them.
 
-The first build deliberately separates AI planning from system execution:
+The first build keeps the AI and execution layers separate:
 
 ```text
 AI
@@ -275,17 +385,21 @@ Phobos policy
 Nmap
 ```
 
-The web reconnaissance stack also uses centralized scope enforcement, bounded crawling, response-size limits, redirect validation, and a single outbound request manager.
+The web reconnaissance stack uses centralized scope enforcement, redirect validation, bounded crawling, response-size limits, and one outbound request manager.
 
-DNS resolution failures are treated as validation failures instead of being silently allowed through. Private/local destinations require an explicit `--allow-private-targets` opt-in.
+DNS resolution failures are treated as validation failures. Private/local destinations require explicit opt-in.
 
-Do not use Phobos against systems you do not own or do not have explicit permission to assess.
+### Public test target
+
+Nmap explicitly documents `scanme.nmap.org` as a target users may scan for testing purposes, with restrictions including Nmap-only testing and a bandwidth-conscious limit of about a dozen scans per day.
+
+Use that host only for the documented Nmap testing purpose; do not treat that permission as permission to exploit or otherwise attack the host.
 
 ---
 
 # Data model
 
-Every discovered surface becomes a typed asset. Examples include:
+Every discovered surface becomes a typed asset. Current types include:
 
 ```text
 website
@@ -301,7 +415,7 @@ resource
 database
 ```
 
-A simplified asset looks like:
+Example:
 
 ```json
 {
@@ -312,27 +426,6 @@ A simplified asset looks like:
   "confidence": 1.0
 }
 ```
-
----
-
-# Graph model
-
-The first build uses an in-memory directed graph:
-
-```text
-[web_input: comment]
-          |
-          v
-[stored_content]
-          |
-          v
-[ai_agent]
-          |
-          v
-[tool: ticketing]
-```
-
-The graph can be serialized to JSON so later security modules can operate on relationships instead of isolated URLs.
 
 ---
 
@@ -347,12 +440,13 @@ The graph can be serialized to JSON so later security modules can operate on rel
 - [x] Unified asset model
 - [x] In-memory execution graph
 - [x] Evidence storage
-- [x] Initial HTML reconnaissance crawler
-- [x] Link, form, input, and JavaScript discovery
-- [x] Automated tests and CI foundation
+- [x] HTML reconnaissance crawler
+- [x] Link, form, input, endpoint, and JavaScript discovery
+- [x] Automated tests and CI
 - [x] Venice Uncensored AI planner
-- [x] Safe fixed-action Nmap runner
+- [x] Fixed-action Nmap runner
 - [x] AI dry-run mode
+- [x] Local environment diagnostics
 
 ### Phase II — Deeper Reconnaissance
 
@@ -389,22 +483,6 @@ The graph can be serialized to JSON so later security modules can operate on rel
 - [ ] reproducible scan sessions
 - [ ] structured reports
 - [ ] CI / security-pipeline integration
-
----
-
-## Project philosophy
-
-```text
-Discover → Normalize → Connect → Reason → Test → Correlate
-```
-
-The crawler provides the data.
-
-The graph gives that data meaning.
-
-The AI planner makes a constrained decision.
-
-The execution layer remains deterministic and policy-controlled.
 
 ---
 

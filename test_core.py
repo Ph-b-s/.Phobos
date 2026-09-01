@@ -65,3 +65,8 @@ def test_cli_ai_dry_run_parser():
         ["ai", "--target", "example.com", "--scope", "example.com", "--dry-run", "run", "nmap"]
     )
     assert a.command == "ai" and a.dry_run is True
+
+
+def test_cli_doctor_parser():
+    a = build_parser().parse_args(["doctor", "--quiet"])
+    assert a.command == "doctor" and a.quiet is True
