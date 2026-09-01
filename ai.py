@@ -1,8 +1,8 @@
-"""Venice AI command planner for the first Phobos agent build.
+"""Venice AI planner for the first Phobos agent build.
 
 Phobos uses Venice's OpenAI-compatible API with the Dolphin Mistral 24B
 Venice Edition, exposed by Venice as ``venice-uncensored``. The model never
-gets shell access; it can only select the single supported reconnaissance
+gets shell access; it can only select a single predefined reconnaissance
 action.
 """
 from __future__ import annotations
@@ -18,10 +18,13 @@ from urllib.request import Request, urlopen
 
 MODEL_NAME = "venice-uncensored"
 DEFAULT_BASE_URL = "https://api.venice.ai/api/v1/chat/completions"
+MAX_REQUEST_CHARS = 4_000
+MAX_RESPONSE_BYTES = 1_000_000
+SUPPORTED_ACTIONS = frozenset({"nmap_top_ports", "refuse"})
 
 
 class AIError(RuntimeError):
-    """Raised when the configured AI provider cannot be used safely."""
+    """Raised when the AI provider cannot be used safely."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,12 +74,17 @@ def _extract_text(payload: dict[str, Any]) -> str:
         return direct.strip()
 
     pieces: list[str] = []
-    for item in payload.get("output", []) if isinstance(payload.get("output"), list) else []:
-        if not isinstance(item, dict):
-            continue
-        for content in item.get("content", []) if isinstance(item.get("content"), list) else []:
-            if isinstance(content, dict) and isinstance(content.get("text"), str):
-                pieces.append(content["text"])
+    output = payload.get("output")
+    if isinstance(output, list):
+        for item in output:
+            if not isinstance(item, dict):
+                continue
+            content_items = item.get("content")
+            if not isinstance(content_items, list):
+                continue
+            for content in content_items:
+                if isinstance(content, dict) and isinstance(content.get("text"), str):
+                    pieces.append(content["text"])
     text = "\n".join(pieces).strip()
     if text:
         return text
@@ -94,11 +102,12 @@ def _parse_decision(text: str) -> dict[str, str]:
         raise AIError("AI returned invalid JSON") from exc
     if not isinstance(value, dict):
         raise AIError("AI returned an invalid decision")
+
     action = value.get("action")
     reason = value.get("reason", "")
     if not isinstance(action, str) or not isinstance(reason, str):
         raise AIError("AI decision has invalid fields")
-    if action not in {"nmap_top_ports", "refuse"}:
+    if action not in SUPPORTED_ACTIONS:
         raise AIError("AI requested an unsupported action")
     return {"action": action, "reason": reason[:500]}
 
@@ -107,23 +116,26 @@ class VeniceClient:
     """Minimal standard-library client for the Venice OpenAI-compatible API."""
 
     def __init__(self, config: AIConfig):
+        if config.timeout <= 0:
+            raise AIError("AI timeout must be positive")
         self.config = config
 
     def decide(self, request_text: str) -> dict[str, str]:
         request_text = request_text.strip()
         if not request_text:
             raise AIError("request must not be empty")
+
         body = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": request_text[:4000]},
+                {"role": "user", "content": request_text[:MAX_REQUEST_CHARS]},
             ],
             "temperature": 0.15,
             "max_tokens": 200,
             "stream": False,
         }
-        encoded = json.dumps(body).encode("utf-8")
+        encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
         request = Request(
             self.config.base_url,
             data=encoded,
@@ -135,14 +147,18 @@ class VeniceClient:
                 "User-Agent": "Phobos/0.1",
             },
         )
+
         try:
             with urlopen(request, timeout=self.config.timeout) as response:
-                raw = response.read(1_000_000)
+                raw = response.read(MAX_RESPONSE_BYTES + 1)
         except HTTPError as exc:
             detail = exc.read(8_192).decode("utf-8", errors="replace")
             raise AIError(f"AI provider returned HTTP {exc.code}: {detail[:500]}") from exc
         except (URLError, TimeoutError) as exc:
             raise AIError(f"AI request failed: {exc}") from exc
+
+        if len(raw) > MAX_RESPONSE_BYTES:
+            raise AIError("AI provider response exceeds the configured size limit")
 
         try:
             payload = json.loads(raw.decode("utf-8"))
