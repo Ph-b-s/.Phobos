@@ -107,13 +107,11 @@ The model never receives shell access and never supplies the Nmap command or arb
 
 # How to run
 
-Phobos targets **Python 3.11+**. The AI-to-Nmap feature is designed to run from a Kali Linux terminal with Nmap installed and an internet connection for the Venice API.
+Phobos targets **Python 3.11+**. The AI-to-Nmap feature runs from a Kali Linux terminal with Nmap installed and an internet connection for the Venice API.
 
 ## AI model
 
-Phobos uses **Dolphin Mistral 24B Venice Edition**, exposed by Venice.ai as **`venice-uncensored` / Venice Uncensored**. Venice documents an OpenAI-compatible Chat Completions API, so Phobos does not need a heavyweight SDK. The Hugging Face model card identifies the same Dolphin Mistral 24B Venice Edition as the model behind Venice Uncensored. [Hugging Face model card](https://huggingface.co/dphn/Dolphin-Mistral-24B-Venice-Edition) · [Venice API](https://venice.ai/venice-api) · [Venice Chat Completions docs](https://docs.venice.ai/api-reference/endpoint/chat/completions)
-
-**No local model hosting is required.** The 24B model runs on Venice infrastructure and Phobos sends requests to Venice over HTTPS.
+Phobos uses **Dolphin Mistral 24B Venice Edition**, exposed by Venice.ai as **`venice-uncensored` / Venice Uncensored**. The integration uses Venice's OpenAI-compatible Chat Completions interface through Python's standard library; no model is hosted locally by Phobos.
 
 ## 1. Clone and install Phobos
 
@@ -156,9 +154,21 @@ The default model identifier is:
 venice-uncensored
 ```
 
-Those defaults can be overridden with `PHOBOS_AI_URL` and `PHOBOS_AI_MODEL` for testing against another compatible endpoint, but the normal Phobos setup uses Venice Uncensored.
+## 3. Test the AI path without executing Nmap
 
-## 3. Run the AI + Nmap action
+For a safe first run, use `--dry-run`. Phobos still validates the explicit target and scope, asks Venice for the decision, and prints the exact fixed command that would be executed.
+
+```bash
+phobos ai \
+  --target scanme.nmap.org \
+  --scope scanme.nmap.org \
+  --dry-run \
+  "Run a simple Nmap reconnaissance scan of the target's common TCP ports."
+```
+
+`--dry-run` never starts Nmap.
+
+## 4. Run the AI + Nmap action
 
 Use a target you own or are explicitly authorized to assess.
 
@@ -192,7 +202,7 @@ phobos ai \
   "Run a simple Nmap reconnaissance scan."
 ```
 
-## 4. Run web reconnaissance
+## 5. Run web reconnaissance
 
 ```bash
 phobos scan https://example.com --scope example.com
@@ -216,7 +226,7 @@ phobos scan https://app.example.com \
   --scope api.example.net
 ```
 
-## 5. Run the test suite
+## 6. Run the test suite
 
 ```bash
 python -m pytest -q
@@ -231,7 +241,7 @@ python -m pytest -q
   Action: nmap_top_ports
   Reason: The request asks for the supported basic TCP reconnaissance action.
 
-[PHOBOS] Executing scoped nmap reconnaissance against https://scanme.nmap.org...
+[PHOBOS] Prepared scoped nmap reconnaissance against https://scanme.nmap.org...
 
 $ /usr/bin/nmap -sT --top-ports 100 --open --reason -- scanme.nmap.org
 Starting Nmap ...
@@ -265,9 +275,9 @@ Phobos policy
 Nmap
 ```
 
-The fact that the selected model is designed to be uncensored does **not** grant it system access. The execution boundary remains deterministic and controlled by Phobos.
-
 The web reconnaissance stack also uses centralized scope enforcement, bounded crawling, response-size limits, redirect validation, and a single outbound request manager.
+
+DNS resolution failures are treated as validation failures instead of being silently allowed through. Private/local destinations require an explicit `--allow-private-targets` opt-in.
 
 Do not use Phobos against systems you do not own or do not have explicit permission to assess.
 
@@ -342,6 +352,7 @@ The graph can be serialized to JSON so later security modules can operate on rel
 - [x] Automated tests and CI foundation
 - [x] Venice Uncensored AI planner
 - [x] Safe fixed-action Nmap runner
+- [x] AI dry-run mode
 
 ### Phase II — Deeper Reconnaissance
 
