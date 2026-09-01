@@ -85,16 +85,22 @@ def test_nmap_runner_blocks_out_of_scope_host(monkeypatch: pytest.MonkeyPatch) -
         run_top_ports_scan("evil-example.com", scope)
 
 
-def test_ai_config_requires_key(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    with pytest.raises(ai.AIError, match="OPENAI_API_KEY"):
-        ai.AIConfig.from_env()
+def test_ai_config_defaults_to_dolphin_mistral() -> None:
+    config = ai.AIConfig.from_env()
+    assert config.model == "dphn/Dolphin-Mistral-24B-Venice-Edition"
+    assert config.base_url == "http://127.0.0.1:8000/v1/chat/completions"
 
 
-def test_response_text_fallback() -> None:
+def test_ai_config_allows_local_endpoint_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOBOS_AI_URL", "http://127.0.0.1:9000/v1/chat/completions")
+    monkeypatch.setenv("PHOBOS_AI_MODEL", "custom-model")
+    config = ai.AIConfig.from_env()
+    assert config.base_url == "http://127.0.0.1:9000/v1/chat/completions"
+    assert config.model == "custom-model"
+
+
+def test_response_text_supports_openai_compatible_shape() -> None:
     payload = {
-        "output": [
-            {"content": [{"type": "output_text", "text": json.dumps({"action": "refuse", "reason": "no"})}]}
-        ]
+        "choices": [{"message": {"content": json.dumps({"action": "refuse", "reason": "no"})}}]
     }
     assert ai._extract_text(payload).startswith("{")
