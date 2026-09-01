@@ -8,7 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from graph import Graph
 from models import Asset, AssetType, EndpointAsset, FormAsset, InputAsset
-from request_manager import HTTPResponseData, RequestError, RequestManager
+from request_manager import RequestError, RequestManager
 
 _SKIP = {"mailto", "tel", "javascript", "data", "blob"}
 
@@ -80,14 +80,19 @@ class ReconResult:
 
 
 class ReconCrawler:
-    def __init__(self, request_manager: RequestManager, *, max_pages: int = 100):
+    def __init__(self, request_manager: RequestManager, *, max_pages: int = 100, max_discovered_urls: int = 5000):
         if max_pages < 1:
             raise ValueError("max_pages must be at least 1")
+        if max_discovered_urls < max_pages:
+            raise ValueError("max_discovered_urls must be at least max_pages")
         self.request_manager = request_manager
         self.max_pages = max_pages
+        self.max_discovered_urls = max_discovered_urls
 
     def crawl(self, target: str, *, graph: Graph | None = None) -> ReconResult:
-        queue = deque([normalize_url(target, target) or target])
+        start = normalize_url(target, target) or target
+        queue = deque([start])
+        queued = {start}
         visited = set()
         seen_ep = set()
         seen_js = set()
@@ -99,6 +104,7 @@ class ReconCrawler:
         inputs = []
         js = []
         errors = []
+        queue_limit_reported = False
 
         while queue and len(visited) < self.max_pages:
             url = queue.popleft()
@@ -138,8 +144,14 @@ class ReconCrawler:
             for link in sorted(parser.result.links):
                 if not self.request_manager.scope.is_in_scope(link):
                     continue
-                if link not in visited:
-                    queue.append(link)
+                if link not in visited and link not in queued:
+                    if len(queued) >= self.max_discovered_urls:
+                        if not queue_limit_reported:
+                            errors.append("discovery queue limit reached; additional URLs were ignored")
+                            queue_limit_reported = True
+                    else:
+                        queue.append(link)
+                        queued.add(link)
                 if link not in seen_ep:
                     seen_ep.add(link)
                     counters["endpoint"] += 1
