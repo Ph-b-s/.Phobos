@@ -10,7 +10,7 @@ Phobos is an open-source framework for authorized security testing of modern web
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-111827?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-TBD-111827?style=flat-square)](#license)
-[![Status](https://img.shields.io/badge/status-first-build-111827?style=flat-square)](#first-build)
+[![Status](https://img.shields.io/badge/status-first%20build-111827?style=flat-square)](#first-build)
 
 </div>
 
@@ -18,161 +18,87 @@ Phobos is an open-source framework for authorized security testing of modern web
 
 ## Why Phobos exists
 
-AI security is rarely a single prompt sent to a single model.
+AI security is rarely a single prompt sent to a single model. A real target is a connected system of web applications, APIs, stored content, AI agents, tools, and external resources.
 
-A real target can look more like:
-
-```text
-User Input
-    │
-    ▼
- Web Application ───────► API
-    │                       │
-    ▼                       ▼
-Stored Content          AI Agent
-                            │
-                  ┌─────────┼─────────┐
-                  ▼         ▼         ▼
-                Tool      Data      Resource
-                  │
-                  ▼
-              External System
-```
-
-The important security questions are therefore not only:
-
-> “Can I jailbreak the model?”
-
-They are also:
-
-- Which inputs can influence an agent?
-- Where can attacker-controlled content be stored?
-- Which tools can the agent call?
-- Which APIs, resources, or internal systems are reachable?
-- Can an attack travel across several components?
-
-**Phobos is being built around that attack surface.**
+Phobos is being built to discover that system, normalize it into assets, connect those assets in a graph, and eventually reason about attack paths across components.
 
 ---
 
-## Core idea
+## First build
 
-Phobos separates **discovery** from **reasoning**.
-
-The reconnaissance layer discovers the system. The target graph preserves relationships between what was found. Future security modules can then reason over that graph instead of operating on isolated URLs.
-
-```text
-                    PHOBOS
-                       │
-              ┌────────┴────────┐
-              │                 │
-           Discover           Model
-              │                 │
-              ▼                 ▼
-       Pages / Forms /      Assets / Nodes /
-       Inputs / APIs /       Relationships
-       JavaScript
-              │                 │
-              └────────┬────────┘
-                       ▼
-                 Target Graph
-                       │
-                       ▼
-           Future AI Security Modules
-```
-
-The first runnable build now also includes a deliberately constrained AI-to-Nmap execution path. The AI chooses **whether** Phobos should perform its one supported Nmap action; Phobos itself constructs the command, validates scope, and executes it without a shell.
-
----
-
-# First build
-
-The first build establishes the **Phobos Core + Target Graph** foundation and a minimal AI execution loop.
+The first build establishes the **Phobos Core + Target Graph** foundation and a deliberately constrained AI-to-Nmap execution path.
 
 ### Web reconnaissance flow
 
 ```text
 Target URL
-    │
-    ▼
-CLI
-    │
-    ▼
-Configuration
-    │
-    ▼
-Scope Validator ◄──── every outbound request
-    │
-    ▼
-Request Manager
-    │
-    ▼
-Recon Crawler
-    │
-    ├── Pages
-    ├── Links / Endpoints
-    ├── Forms
-    ├── Inputs
-    └── JavaScript references
-    │
-    ▼
-Unified Asset Model
-    │
-    ▼
-Execution Graph
-    │
-    ▼
-Evidence / JSON artifacts
+    |
+    v
+CLI -> Configuration -> Scope Validator -> Request Manager
+                                      |
+                                      v
+                               Recon Crawler
+                             /      |       \
+                         Pages   Forms   Inputs / JS
+                             \      |       /
+                              v     v      v
+                         Unified Asset Model
+                                  |
+                                  v
+                            Execution Graph
+                                  |
+                                  v
+                         JSON evidence artifacts
 ```
 
 ### AI-to-Nmap flow
 
 ```text
 Natural-language request
-          │
-          ▼
-       AI planner
-          │
-          ▼
-  structured decision
-          │
-          ├──────────────► refuse
-          │
-          ▼
-   nmap_top_ports
-          │
-          ▼
- Target + explicit scope
-          │
-          ▼
-   Scope Validator
-          │
-          ▼
-    Nmap Runner
-          │
-          ▼
-      nmap -sT --top-ports 100 --open --reason -- TARGET
+          |
+          v
+  Dolphin Mistral 24B
+  Venice Edition (local)
+          |
+          v
+  Structured decision
+      /          \
+  refuse      nmap_top_ports
+                  |
+                  v
+        Explicit target + scope
+                  |
+                  v
+          Scope Validator
+                  |
+                  v
+           Fixed Nmap runner
+                  |
+                  v
+       nmap -sT --top-ports 100
 ```
 
-The AI has no shell access and cannot supply arbitrary Nmap arguments. This keeps the first agent implementation intentionally narrow and auditable.
+The model never receives shell access and never supplies the Nmap command or arbitrary arguments. Phobos performs the policy decision and constructs the executable command itself.
 
 ### Repository architecture
 
 ```text
 .Phobos/
-├── cli.py                    # CLI entry point
-├── config.py                 # Scan configuration
-├── scope.py                  # Central scope enforcement
-├── request_manager.py        # Single outbound HTTP boundary
-├── models.py                 # Unified asset / finding models
-├── crawler.py                # Bounded HTML reconnaissance
-├── graph.py                  # In-memory directed graph
-├── nodes.py                  # Graph node / edge definitions
-├── evidence.py               # Scan artifacts / evidence storage
-├── ai.py                     # AI planner (no shell access)
-├── nmap_runner.py            # Safe Nmap execution boundary
-├── tests...
-├── .github/workflows/
+├── cli.py
+├── config.py
+├── scope.py
+├── request_manager.py
+├── models.py
+├── crawler.py
+├── graph.py
+├── nodes.py
+├── evidence.py
+├── ai.py
+├── nmap_runner.py
+├── test_core.py
+├── test_recon.py
+├── test_ai.py
+├── .github/workflows/test.yml
 ├── pyproject.toml
 └── README.md
 ```
@@ -181,55 +107,66 @@ The AI has no shell access and cannot supply arbitrary Nmap arguments. This keep
 
 # How to run
 
-Phobos targets **Python 3.11+**. The AI-to-Nmap feature is designed to run in a Kali Linux terminal with `nmap` installed.
+Phobos targets **Python 3.11+**. The AI-to-Nmap feature is designed to run from a Kali Linux terminal with Nmap installed and a local OpenAI-compatible inference server running the requested model.
 
-## 1. Clone and install
+The selected model is:
+
+**`dphn/Dolphin-Mistral-24B-Venice-Edition`**
+
+The model card recommends vLLM for production-style inference and documents an OpenAI-compatible `/v1/chat/completions` endpoint. The base model is 24B parameters in BF16; the model documentation notes that the full model needs more than 60 GB of GPU memory when run on GPU. citeturn142148view0
+
+## 1. Clone and install Phobos
 
 ```bash
 git clone -b flat-structure https://github.com/Ph-b-s/.Phobos.git
 cd .Phobos
+
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-Verify the installation:
+Verify the CLI and Nmap:
 
 ```bash
 phobos --help
 nmap --version
 ```
 
-## 2. Configure the AI provider
+## 2. Install and start Dolphin Mistral locally
 
-The first build uses the OpenAI Responses API through Python's standard library. No OpenAI SDK is required.
-
-Set your API key in the terminal session:
+Install vLLM:
 
 ```bash
-export OPENAI_API_KEY="YOUR_API_KEY"
+python -m pip install --upgrade vllm
 ```
 
-The default model is `gpt-5.6-luna`. You can override it without changing code:
+Start the model server:
 
 ```bash
-export PHOBOS_AI_MODEL="gpt-5.6-luna"
+vllm serve "dphn/Dolphin-Mistral-24B-Venice-Edition" \
+  --runner generate \
+  --port 8000 \
+  --tool-call-parser mistral \
+  --enable-auto-tool-choice \
+  --max-model-len 131072 \
+  --limit-mm-per-prompt '{"image": 10}'
 ```
 
-For an OpenAI-compatible proxy/provider, the endpoint can also be overridden:
+These launch parameters follow the model author's documented vLLM setup. citeturn142148view0
 
-```bash
-export PHOBOS_AI_URL="https://your-provider.example/v1/responses"
+Leave that terminal running. Phobos expects the local OpenAI-compatible endpoint at:
+
+```text
+http://127.0.0.1:8000/v1/chat/completions
 ```
 
-Phobos never stores the API key in the repository.
+No OpenAI API key is required for the default local setup.
 
-## 3. Run the AI + Nmap example
+## 3. Run the AI + Nmap action
 
-Use a target you own or are explicitly authorized to assess. The target is supplied separately from the AI request so the model cannot choose a different host.
-
-Example:
+Use a target you own or are explicitly authorized to assess.
 
 ```bash
 phobos ai \
@@ -238,17 +175,20 @@ phobos ai \
   "Run a simple Nmap reconnaissance scan of the target's common TCP ports."
 ```
 
-Phobos will:
+What happens:
 
-1. send the request to the AI planner;
-2. accept only the predefined `nmap_top_ports` action or `refuse`;
-3. validate the target against the explicit scope;
-4. execute Nmap with `shell=False` and a fixed argument set;
-5. print the normal Nmap result directly in the terminal.
+1. Phobos sends the natural-language request to the local Dolphin model.
+2. The model may return only `nmap_top_ports` or `refuse`.
+3. Phobos validates the explicit target against the explicit scope.
+4. Phobos constructs the Nmap command itself.
+5. Nmap executes with `shell=False`, a fixed argument set, and a timeout.
+6. The Nmap result is printed in the terminal.
 
-The AI cannot inject shell syntax, arbitrary Nmap switches, scripts, output paths, or a different target.
+The model cannot choose a different host, add arbitrary Nmap switches, inject shell syntax, or execute another program.
 
-For private/local targets, opt in explicitly:
+### Private/local targets
+
+Private destinations are blocked by default. For an explicitly authorized local lab target, opt in:
 
 ```bash
 phobos ai \
@@ -258,21 +198,13 @@ phobos ai \
   "Run a simple Nmap reconnaissance scan."
 ```
 
-## 4. Run the web reconnaissance build
+## 4. Run web reconnaissance
 
 ```bash
 phobos scan https://example.com --scope example.com
 ```
 
-Multiple domains can be supplied explicitly:
-
-```bash
-phobos scan https://app.example.com \
-  --scope example.com \
-  --scope api.example.net
-```
-
-Control crawler size, timeout, and output location:
+Useful options:
 
 ```bash
 phobos scan https://example.com \
@@ -282,25 +214,23 @@ phobos scan https://example.com \
   --output ./results
 ```
 
-The default scope is the target hostname when `--scope` is omitted.
+Multiple scopes can be supplied explicitly:
 
-## 5. Run the tests
+```bash
+phobos scan https://app.example.com \
+  --scope example.com \
+  --scope api.example.net
+```
+
+## 5. Run the test suite
 
 ```bash
 python -m pytest -q
 ```
 
-You can also run the CLI without arguments to see the command list:
-
-```bash
-phobos --help
-```
-
 ---
 
 # Example output
-
-AI + Nmap:
 
 ```text
 [PHOBOS AI] Sending request to AI planner...
@@ -315,85 +245,7 @@ Starting Nmap ...
 ✓ nmap completed successfully
 ```
 
-Web reconnaissance:
-
-```text
-[PHOBOS] Starting reconnaissance...
-  Target: https://example.com
-  Scope:  example.com
-
-✓ 34 pages discovered
-✓ 12 forms discovered
-✓ 47 input parameters discovered
-✓ 0 API endpoints discovered
-✓ 23 JavaScript files analyzed
-
-Building execution graph...
-
-✓ 124 nodes created
-✓ 178 relationships created
-
-Scan complete.
-Results saved to .phobos
-```
-
-The exact counts and Nmap results depend on the target.
-
----
-
-# Data model
-
-A discovered asset is normalized into a common structure:
-
-```json
-{
-  "id": "input_001",
-  "type": "input",
-  "name": "comment",
-  "url": "https://target.example/comments",
-  "confidence": 1.0,
-  "metadata": {
-    "source_form": "form_001",
-    "source_page": "https://target.example/comments"
-  }
-}
-```
-
-Forms and endpoints preserve additional information such as method, status code, input names, source relationships, and discovery context.
-
----
-
-# Graph model
-
-The graph is intentionally in-memory in the first build. A graph database is not required to understand the architecture and would add unnecessary coupling this early.
-
-Nodes and relationships can be serialized deterministically:
-
-```json
-{
-  "nodes": [
-    {
-      "id": "input_001",
-      "type": "input",
-      "label": "comment"
-    },
-    {
-      "id": "agent_001",
-      "type": "ai_agent",
-      "label": "Support Agent"
-    }
-  ],
-  "edges": [
-    {
-      "source": "input_001",
-      "target": "agent_001",
-      "relationship": "influences"
-    }
-  ]
-}
-```
-
-This makes it possible to grow from simple web discovery toward richer attack-path analysis without redesigning the data layer.
+The exact output depends on the target and local Nmap installation.
 
 ---
 
@@ -401,35 +253,84 @@ This makes it possible to grow from simple web discovery toward richer attack-pa
 
 Phobos is intended for **authorized security testing only**.
 
-The first build deliberately separates planning from execution:
+The first build deliberately separates AI planning from system execution:
 
 ```text
 AI
- │
- │ structured decision only
- ▼
+ |
+ | structured decision only
+ v
 Phobos policy
- │
- ├── explicit target
- ├── scope validation
- ├── fixed Nmap action
- └── shell disabled
-      │
-      ▼
-    Nmap
+ |
+ +-- explicit target
+ +-- explicit scope
+ +-- fixed Nmap action
+ +-- shell disabled
+ |
+ v
+Nmap
 ```
 
-The web reconnaissance stack also uses an explicit scope boundary, bounded crawling, response-size limits, redirect validation, and a single outbound request manager.
-
-Private/local destinations are rejected by default and require an explicit `--allow-private-targets` opt-in.
+The web reconnaissance stack also uses centralized scope enforcement, bounded crawling, response-size limits, redirect validation, and a single outbound request manager.
 
 Do not use Phobos against systems you do not own or do not have explicit permission to assess.
 
 ---
 
-# Roadmap
+# Data model
 
-Phobos is intentionally being built in layers.
+Every discovered surface becomes a typed asset. Examples include:
+
+```text
+website
+page
+endpoint
+form
+input
+api
+javascript
+ai_agent
+tool
+resource
+database
+```
+
+A simplified asset looks like:
+
+```json
+{
+  "id": "input_001",
+  "type": "input",
+  "name": "comment",
+  "url": "https://target.example/comments",
+  "confidence": 1.0
+}
+```
+
+---
+
+# Graph model
+
+The first build uses an in-memory directed graph:
+
+```text
+[web_input: comment]
+          |
+          v
+[stored_content]
+          |
+          v
+[ai_agent]
+          |
+          v
+[tool: ticketing]
+```
+
+The graph can be serialized to JSON so later security modules can operate on relationships instead of isolated URLs.
+
+---
+
+# Roadmap
 
 ### Phase I — Core + Target Graph
 
@@ -443,13 +344,12 @@ Phobos is intentionally being built in layers.
 - [x] Initial HTML reconnaissance crawler
 - [x] Link, form, input, and JavaScript discovery
 - [x] Automated tests and CI foundation
-- [x] Minimal AI planner
+- [x] Local Dolphin Mistral AI planner
 - [x] Safe fixed-action Nmap runner
 
 ### Phase II — Deeper Reconnaissance
 
 - [ ] API endpoint discovery
-- [ ] Query/body parameter normalization
 - [ ] JavaScript endpoint extraction
 - [ ] robots.txt / sitemap awareness
 - [ ] Content and technology fingerprinting
@@ -485,11 +385,7 @@ Phobos is intentionally being built in layers.
 
 ---
 
-# Project philosophy
-
-Phobos is not being designed as another collection of disconnected vulnerability scanners.
-
-The goal is a security framework that can understand a target as a **system**:
+## Project philosophy
 
 ```text
 Discover → Normalize → Connect → Reason → Test → Correlate
@@ -499,11 +395,9 @@ The crawler provides the data.
 
 The graph gives that data meaning.
 
-The AI planner makes a constrained decision.
+The local AI planner makes a constrained decision.
 
 The execution layer remains deterministic and policy-controlled.
-
-The security modules come after that foundation.
 
 ---
 
