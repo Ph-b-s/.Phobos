@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from http.client import HTTPResponse
-from urllib.error import HTTPError, HTTPRedirectHandler, URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
-from urllib.request import Request, build_opener
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from .scope import ScopeError, ScopeValidator
 
