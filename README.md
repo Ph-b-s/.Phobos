@@ -10,7 +10,7 @@ Phobos is an open-source framework for authorized security testing of modern web
 
 [![Python](https://img.shields.io/badge/python-3.11%2B-111827?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-TBD-111827?style=flat-square)](#license)
-[![Status](https://img.shields.io/badge/status-early%20development-111827?style=flat-square)](#roadmap)
+[![Status](https://img.shields.io/badge/status-first-build-111827?style=flat-square)](#first-build)
 
 </div>
 
@@ -81,15 +81,15 @@ The reconnaissance layer discovers the system. The target graph preserves relati
            Future AI Security Modules
 ```
 
-This first build deliberately establishes that foundation before adding aggressive security testing.
+The first runnable build now also includes a deliberately constrained AI-to-Nmap execution path. The AI chooses **whether** Phobos should perform its one supported Nmap action; Phobos itself constructs the command, validates scope, and executes it without a shell.
 
 ---
 
 # First build
 
-The current implementation establishes the **Phobos Core + Target Graph** foundation.
+The first build establishes the **Phobos Core + Target Graph** foundation and a minimal AI execution loop.
 
-### Scan flow
+### Web reconnaissance flow
 
 ```text
 Target URL
@@ -125,31 +125,53 @@ Execution Graph
 Evidence / JSON artifacts
 ```
 
+### AI-to-Nmap flow
+
+```text
+Natural-language request
+          │
+          ▼
+       AI planner
+          │
+          ▼
+  structured decision
+          │
+          ├──────────────► refuse
+          │
+          ▼
+   nmap_top_ports
+          │
+          ▼
+ Target + explicit scope
+          │
+          ▼
+   Scope Validator
+          │
+          ▼
+    Nmap Runner
+          │
+          ▼
+      nmap -sT --top-ports 100 --open --reason -- TARGET
+```
+
+The AI has no shell access and cannot supply arbitrary Nmap arguments. This keeps the first agent implementation intentionally narrow and auditable.
+
 ### Repository architecture
 
 ```text
 .Phobos/
-├── phobos/
-│   ├── cli/
-│   │   └── main.py              # CLI entry point
-│   │
-│   ├── core/
-│   │   ├── config.py            # Scan configuration
-│   │   ├── scope.py             # Central scope enforcement
-│   │   ├── request_manager.py   # Single outbound HTTP boundary
-│   │   └── models.py            # Unified asset / finding models
-│   │
-│   ├── recon/
-│   │   └── crawler.py           # Bounded HTML reconnaissance
-│   │
-│   ├── graph/
-│   │   ├── graph.py             # In-memory directed graph
-│   │   └── nodes.py              # Graph node / edge definitions
-│   │
-│   └── storage/
-│       └── evidence.py          # Scan artifacts and evidence storage
-│
-├── tests/
+├── cli.py                    # CLI entry point
+├── config.py                 # Scan configuration
+├── scope.py                  # Central scope enforcement
+├── request_manager.py        # Single outbound HTTP boundary
+├── models.py                 # Unified asset / finding models
+├── crawler.py                # Bounded HTML reconnaissance
+├── graph.py                  # In-memory directed graph
+├── nodes.py                  # Graph node / edge definitions
+├── evidence.py               # Scan artifacts / evidence storage
+├── ai.py                     # AI planner (no shell access)
+├── nmap_runner.py            # Safe Nmap execution boundary
+├── tests...
 ├── .github/workflows/
 ├── pyproject.toml
 └── README.md
@@ -157,93 +179,86 @@ Evidence / JSON artifacts
 
 ---
 
-# Design principles
+# How to run
 
-## 1. Scope is a security boundary
+Phobos targets **Python 3.11+**. The AI-to-Nmap feature is designed to run in a Kali Linux terminal with `nmap` installed.
 
-There is one request path:
-
-```text
-Module → RequestManager → ScopeValidator → HTTP
-```
-
-Modules should not perform direct network access.
-
-The scope validator uses hostname boundaries rather than naive string matching, so a target such as `evil-example.com` cannot pass a scope intended for `example.com`.
-
-Redirect destinations are validated **before** Phobos follows them.
-
-## 2. Everything discovered becomes an asset
-
-A page is not just a URL string. A form is not just HTML. An input is potentially an attack surface.
-
-Phobos normalizes discoveries into typed assets such as:
-
-```text
-website
-page
-endpoint
-form
-input
-api
-javascript
-ai_agent
-tool
-resource
-database
-```
-
-That same model is intended to carry forward into AI-specific discovery.
-
-## 3. Relationships matter
-
-The graph is the core of the long-term design.
-
-Example:
-
-```text
-[web_input: comment]
-          │
-          ▼
-[stored_content]
-          │
-          ▼
-[ai_agent]
-          │
-          ▼
-[tool: ticketing]
-```
-
-A future module can then reason about the path rather than treating each component as an independent target.
-
-## 4. Evidence from the beginning
-
-Every scan produces machine-readable artifacts that can later be used for reporting, correlation, replay, and security findings.
-
-The output directory is designed around:
-
-```text
-.phobos/
-├── scan.json
-├── assets.json
-├── graph.json
-├── findings.json
-└── evidence/
-```
-
----
-
-# Quick start
-
-### Install from a local clone
+## 1. Clone and install
 
 ```bash
-git clone https://github.com/Ph-b-s/.Phobos.git
+git clone -b flat-structure https://github.com/Ph-b-s/.Phobos.git
 cd .Phobos
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
 python -m pip install -e .
 ```
 
-### Run a scoped scan
+Verify the installation:
+
+```bash
+phobos --help
+nmap --version
+```
+
+## 2. Configure the AI provider
+
+The first build uses the OpenAI Responses API through Python's standard library. No OpenAI SDK is required.
+
+Set your API key in the terminal session:
+
+```bash
+export OPENAI_API_KEY="YOUR_API_KEY"
+```
+
+The default model is `gpt-5.6-luna`. You can override it without changing code:
+
+```bash
+export PHOBOS_AI_MODEL="gpt-5.6-luna"
+```
+
+For an OpenAI-compatible proxy/provider, the endpoint can also be overridden:
+
+```bash
+export PHOBOS_AI_URL="https://your-provider.example/v1/responses"
+```
+
+Phobos never stores the API key in the repository.
+
+## 3. Run the AI + Nmap example
+
+Use a target you own or are explicitly authorized to assess. The target is supplied separately from the AI request so the model cannot choose a different host.
+
+Example:
+
+```bash
+phobos ai \
+  --target scanme.nmap.org \
+  --scope scanme.nmap.org \
+  "Run a simple Nmap reconnaissance scan of the target's common TCP ports."
+```
+
+Phobos will:
+
+1. send the request to the AI planner;
+2. accept only the predefined `nmap_top_ports` action or `refuse`;
+3. validate the target against the explicit scope;
+4. execute Nmap with `shell=False` and a fixed argument set;
+5. print the normal Nmap result directly in the terminal.
+
+The AI cannot inject shell syntax, arbitrary Nmap switches, scripts, output paths, or a different target.
+
+For private/local targets, opt in explicitly:
+
+```bash
+phobos ai \
+  --target 192.168.56.10 \
+  --scope 192.168.56.10 \
+  --allow-private-targets \
+  "Run a simple Nmap reconnaissance scan."
+```
+
+## 4. Run the web reconnaissance build
 
 ```bash
 phobos scan https://example.com --scope example.com
@@ -257,7 +272,7 @@ phobos scan https://app.example.com \
   --scope api.example.net
 ```
 
-Control crawler depth and output location:
+Control crawler size, timeout, and output location:
 
 ```bash
 phobos scan https://example.com \
@@ -269,9 +284,38 @@ phobos scan https://example.com \
 
 The default scope is the target hostname when `--scope` is omitted.
 
+## 5. Run the tests
+
+```bash
+python -m pytest -q
+```
+
+You can also run the CLI without arguments to see the command list:
+
+```bash
+phobos --help
+```
+
 ---
 
 # Example output
+
+AI + Nmap:
+
+```text
+[PHOBOS AI] Sending request to AI planner...
+  Action: nmap_top_ports
+  Reason: The request asks for the supported basic TCP reconnaissance action.
+
+[PHOBOS] Executing scoped nmap reconnaissance against https://scanme.nmap.org...
+
+$ /usr/bin/nmap -sT --top-ports 100 --open --reason -- scanme.nmap.org
+Starting Nmap ...
+...
+✓ nmap completed successfully
+```
+
+Web reconnaissance:
 
 ```text
 [PHOBOS] Starting reconnaissance...
@@ -293,7 +337,7 @@ Scan complete.
 Results saved to .phobos
 ```
 
-The exact counts depend on the target.
+The exact counts and Nmap results depend on the target.
 
 ---
 
@@ -353,6 +397,36 @@ This makes it possible to grow from simple web discovery toward richer attack-pa
 
 ---
 
+# Security model
+
+Phobos is intended for **authorized security testing only**.
+
+The first build deliberately separates planning from execution:
+
+```text
+AI
+ │
+ │ structured decision only
+ ▼
+Phobos policy
+ │
+ ├── explicit target
+ ├── scope validation
+ ├── fixed Nmap action
+ └── shell disabled
+      │
+      ▼
+    Nmap
+```
+
+The web reconnaissance stack also uses an explicit scope boundary, bounded crawling, response-size limits, redirect validation, and a single outbound request manager.
+
+Private/local destinations are rejected by default and require an explicit `--allow-private-targets` opt-in.
+
+Do not use Phobos against systems you do not own or do not have explicit permission to assess.
+
+---
+
 # Roadmap
 
 Phobos is intentionally being built in layers.
@@ -369,6 +443,8 @@ Phobos is intentionally being built in layers.
 - [x] Initial HTML reconnaissance crawler
 - [x] Link, form, input, and JavaScript discovery
 - [x] Automated tests and CI foundation
+- [x] Minimal AI planner
+- [x] Safe fixed-action Nmap runner
 
 ### Phase II — Deeper Reconnaissance
 
@@ -409,34 +485,6 @@ Phobos is intentionally being built in layers.
 
 ---
 
-# Security model
-
-Phobos is intended for **authorized security testing only**.
-
-The project is designed around an explicit scope boundary, bounded crawling, response-size limits, redirect validation, and a single outbound request manager. Those controls are part of the architecture rather than optional conventions.
-
-Do not use Phobos against systems you do not own or do not have explicit permission to assess.
-
----
-
-# Development
-
-Phobos targets Python 3.11+ and currently uses the Python standard library for the core reconnaissance stack.
-
-Run the test suite with:
-
-```bash
-python -m pytest
-```
-
-Run the CLI help with:
-
-```bash
-phobos --help
-```
-
----
-
 # Project philosophy
 
 Phobos is not being designed as another collection of disconnected vulnerability scanners.
@@ -450,6 +498,10 @@ Discover → Normalize → Connect → Reason → Test → Correlate
 The crawler provides the data.
 
 The graph gives that data meaning.
+
+The AI planner makes a constrained decision.
+
+The execution layer remains deterministic and policy-controlled.
 
 The security modules come after that foundation.
 
