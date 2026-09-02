@@ -39,7 +39,9 @@ def test_engine_runs_procedure_and_correlates_result():
     )
     assert run.result.status == "confirmed"
     assert run.result.confidence == 0.95
-    assert all(step.status == "completed" for step in run.steps)
+    assert all(step.status == "completed" for step in run.steps[:-1])
+    assert run.steps[-1].step_id == "validate_impact"
+    assert run.steps[-1].status == "blocked"
 
 
 def test_engine_requires_explicit_state_change_permission():
@@ -78,10 +80,9 @@ def test_missing_handler_stops_by_default():
 
 
 def test_bad_handler_output_is_rejected():
-    run = AssessmentEngine().run(
+    run = AssessmentEngine(stop_on_error=True).run(
         INDIRECT_PROMPT_INJECTION_PROCEDURE,
         {"discover_chat": lambda _: ["not-an-observation"]},
-        stop_on_error=True,
     )
     assert run.steps[-1].status == "error"
     assert "Observation" in run.steps[-1].error
