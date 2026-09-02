@@ -88,6 +88,28 @@ def test_bad_handler_output_is_rejected():
     assert run.result.status == "not_confirmed"
 
 
+def test_step_must_emit_its_declared_observation():
+    run = AssessmentEngine().run(
+        INDIRECT_PROMPT_INJECTION_PROCEDURE,
+        {"discover_chat": lambda _: [_obs("wrong_kind")]},
+    )
+    assert run.steps[-1].status == "error"
+    assert "required observations" in run.steps[-1].error
+    assert run.observations == ()
+    assert run.result.status == "not_confirmed"
+
+
+def test_observation_input_is_hardened():
+    with pytest.raises(ValueError):
+        Observation("x", "a" * 4_001)
+    with pytest.raises(ValueError):
+        Observation("x", "ok", evidence=("a" * 4_001,))
+    with pytest.raises(TypeError):
+        Observation("x", "ok", evidence=(1,))
+    with pytest.raises(TypeError):
+        Observation("x", "ok", metadata=[])
+
+
 def test_engine_limits_are_validated():
     with pytest.raises(ValueError):
         AssessmentEngine(max_steps=0)
