@@ -1,8 +1,6 @@
 """Tests for the single outbound HTTP boundary."""
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from request_manager import HTTPResponseData, RequestError, RequestManager
@@ -120,6 +118,16 @@ def test_request_manager_enforces_body_size_limit():
     with pytest.raises(RequestError, match="size limit"):
         manager.get("https://example.com/")
     assert response.closed is True
+
+
+def test_request_manager_reset_session_clears_cookie_jar():
+    manager = RequestManager(
+        ScopeValidator(("example.com",), allow_private_targets=True),
+    )
+    manager._cookie_jar.set_cookie_next(None)
+    assert len(manager._cookie_jar) == 0
+    manager.reset_session()
+    assert len(manager._cookie_jar) == 0
 
 
 def test_request_manager_rejects_invalid_configuration():
