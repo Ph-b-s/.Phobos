@@ -18,6 +18,10 @@ STATUS_STRONG_SIGNAL = "strong_signal"
 STATUS_CONFIRMED = "confirmed"
 FINDING_TYPE = "indirect_prompt_injection"
 _CANARY_RE = re.compile(r"^PHOBOS-[A-F0-9]{16}$")
+_MAX_DESCRIPTION_LENGTH = 4_000
+_MAX_SOURCE_LENGTH = 1_000
+_MAX_EVIDENCE_ITEMS = 64
+_MAX_EVIDENCE_LENGTH = 4_000
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,15 +38,28 @@ class Observation:
         kind = self.kind.strip()
         description = self.description.strip()
         source = self.source.strip()
+        evidence = tuple(self.evidence)
         if not kind:
             raise ValueError("observation kind must not be empty")
         if not description:
             raise ValueError("observation description must not be empty")
-        if any(not isinstance(item, str) for item in self.evidence):
+        if len(description) > _MAX_DESCRIPTION_LENGTH:
+            raise ValueError("observation description exceeds size limit")
+        if len(source) > _MAX_SOURCE_LENGTH:
+            raise ValueError("observation source exceeds size limit")
+        if len(evidence) > _MAX_EVIDENCE_ITEMS:
+            raise ValueError("observation evidence item limit exceeded")
+        if any(not isinstance(item, str) for item in evidence):
             raise TypeError("observation evidence must contain only strings")
+        if any(len(item) > _MAX_EVIDENCE_LENGTH for item in evidence):
+            raise ValueError("observation evidence item exceeds size limit")
+        if not isinstance(self.metadata, dict):
+            raise TypeError("observation metadata must be a dictionary")
         object.__setattr__(self, "kind", kind)
         object.__setattr__(self, "description", description)
         object.__setattr__(self, "source", source)
+        object.__setattr__(self, "evidence", evidence)
+        object.__setattr__(self, "metadata", dict(self.metadata))
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,12 +71,18 @@ class AssessmentStep:
     active: bool = True
 
     def __post_init__(self) -> None:
-        if not self.id.strip() or not self.title.strip() or not self.objective.strip():
+        step_id = self.id.strip()
+        title = self.title.strip()
+        objective = self.objective.strip()
+        kinds = tuple(dict.fromkeys(item.strip() for item in self.required_observations))
+        if not step_id or not title or not objective:
             raise ValueError("assessment step requires id, title, and objective")
-        if not self.required_observations:
-            raise ValueError("assessment step requires at least one observation kind")
-        if any(not item.strip() for item in self.required_observations):
+        if not kinds or any(not item for item in kinds):
             raise ValueError("assessment observation kinds must not be empty")
+        object.__setattr__(self, "id", step_id)
+        object.__setattr__(self, "title", title)
+        object.__setattr__(self, "objective", objective)
+        object.__setattr__(self, "required_observations", kinds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,6 +130,11 @@ class AssessmentResult:
             raise ValueError("not_confirmed results must not contain a finding type")
         if self.status != STATUS_NOT_CONFIRMED and not self.finding_type:
             raise ValueError("positive results require a finding type")
+        if not self.summary.strip():
+            raise ValueError("assessment result summary must not be empty")
+        object.__setattr__(self, "evidence", tuple(self.evidence))
+        if not isinstance(self.metadata, dict):
+            object.__setattr__(self, "metadata", dict(self.metadata))
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -183,6 +211,8 @@ def new_canary() -> str:
 
 def validate_canary(canary: str) -> str:
     """Normalize and validate a Phobos-generated canary."""
+    if not isinstance(canary, str):
+        raise TypeError("canary must be a string")
     marker = canary.strip().upper()
     if not _CANARY_RE.fullmatch(marker):
         raise ValueError("canary must match PHOBOS-[16 uppercase hex characters]")
@@ -200,6 +230,8 @@ def build_indirect_canary(canary: str) -> str:
 
 def build_test_queries(product_name: str) -> tuple[str, ...]:
     """Return neutral queries that cause the application to summarize a data item."""
+    if not isinstance(product_name, str):
+        raise TypeError("product_name must be a string")
     name = product_name.strip()
     if not name:
         raise ValueError("product_name must not be empty")
