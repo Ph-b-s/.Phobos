@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from crawler import ReconCrawler
-from request_manager import HTTPResponseData
+from request_manager import HTTPResponseData, RequestError
 from scope import ScopeValidator
 
 
@@ -11,7 +11,10 @@ class FakeRequestManager:
     pages: dict[str, HTTPResponseData]
 
     def get(self, url, *, headers=None):
-        return self.pages[url]
+        try:
+            return self.pages[url]
+        except KeyError as exc:
+            raise RequestError(f"fake page not found: {url}") from exc
 
 
 def test_recon_queue_is_bounded():
@@ -33,6 +36,7 @@ def test_recon_queue_is_bounded():
     )
     result = ReconCrawler(manager, max_pages=5, max_discovered_urls=5).crawl(root)
     assert len(result.pages) == 1
+    assert any("fake page not found" in error for error in result.errors)
     assert any("discovery queue limit reached" in error for error in result.errors)
 
 
