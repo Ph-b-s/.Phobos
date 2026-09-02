@@ -1,59 +1,86 @@
-# About Phobos
+# PHOBOS
 
-## The project
+Phobos is an open-source framework for authorized, evidence-driven security testing of modern web applications and AI systems.
 
-Phobos is a practical security engineering project focused on understanding how modern web applications and AI systems behave as connected systems, not isolated components.
+The project is evolving from passive reconnaissance toward an assessment engine that can discover AI attack surfaces, execute bounded vulnerability procedures, correlate evidence across requests and components, and produce defensible findings.
 
-The framework combines **web security, AI security, offensive security, and software engineering** into one workflow designed to discover attack surfaces, model relationships, preserve evidence, and eventually test security consequences across components.
+## Current direction
 
-The goal is not another collection of disconnected scanners. Phobos is intended to become a framework where a discovered web input can eventually be connected to an API, an AI agent, a tool, and the resource that tool can reach — creating a usable model of the real attack path.
-
-## Core principle
-
-> **Map the system before you attack the model.**
-
-That starts with solid engineering fundamentals: strict scope control, a single request boundary, deterministic data models, bounded discovery, evidence-backed results, and an execution graph that can grow as more of the target becomes known.
-
-AI-specific testing comes after that foundation, so findings can be understood in context rather than as isolated prompt behavior.
-
-## Current focus
-
-The current build is centered on:
-
-- passive web reconnaissance
-- endpoint, form, input, and JavaScript discovery
-- passive detection of likely AI endpoints, providers, agent signals, and AI-oriented inputs
-- graph-based representation of discovered relationships
-- constrained Venice AI planning that selects only predefined Phobos capabilities
-
-The next major step is deeper AI-agent surface analysis, followed by controlled prompt-injection, tool-abuse, sensitive-data, and guardrail testing on explicitly authorized targets.
-
-## Engineering approach
-
-Phobos is developed incrementally. Each layer should be useful on its own, easy to test, and strong enough to support the layer that comes next.
+Phobos does not aim to be a collection of payloads or a thin wrapper around an LLM. Its core model is:
 
 ```text
-Discover
-   ↓
-Normalize
-   ↓
-Connect
-   ↓
-Reason
-   ↓
-Test
-   ↓
-Correlate
+Discover → Normalize → Connect → Probe → Validate → Correlate → Report
 ```
 
-The long-term objective is a security framework that can move from **"What is here?"** to **"How are these components connected?"** and finally to **"What security consequences follow from those connections?"**
+The central security object is the **attack path** across trust boundaries:
 
-## Why the name
+```text
+untrusted input
+      ↓
+application state
+      ↓
+LLM context
+      ↓
+model decision
+      ↓
+API / tool
+      ↓
+privileged or security-relevant action
+```
 
-Phobos is the larger of Mars' two moons and the source of the project's identity: a name associated with proximity and observation of an environment that can be difficult to understand from the surface.
+## Current implementation
 
-For this project, the name represents the same security principle: get close enough to understand the system before attempting to break it.
+The repository currently contains:
 
----
+- bounded web reconnaissance
+- centralized target/scope enforcement
+- a normalized asset and relationship graph
+- passive AI-surface discovery
+- constrained AI-assisted reconnaissance planning
+- evidence storage
+- the first evidence-driven active assessment procedure for indirect prompt injection
+- regression tests for evidence correlation and false positives
 
-Phobos is developed for authorized security research, learning, and defensive engineering.
+The indirect-prompt-injection procedure is intentionally reusable. It models the security investigation rather than encoding a single training-lab URL, product name, user name, or magic payload.
+
+## Assessment standard
+
+A positive finding should be evidence-backed. In particular, indirect prompt injection should not be reported as confirmed merely because suspicious text is present or because a scanner sees a generic model response.
+
+The current correlation layer requires a relationship between:
+
+```text
+attacker-controlled indirect source
+        +
+unique Phobos canary
+        +
+LLM interaction
+        +
+clean baseline comparison
+        ↓
+confirmed influence
+```
+
+A controlled state-changing action may then provide stronger impact evidence.
+
+## Benchmark strategy
+
+PortSwigger Web Security Academy labs are being used as behavioral benchmarks. The objective is to reproduce the **methodology and security reasoning** behind the labs, not their exact solutions.
+
+For each benchmark, Phobos should be evaluated on:
+
+1. attack-surface discovery
+2. trust-boundary identification
+3. procedure execution
+4. evidence capture
+5. vulnerability classification
+6. reproducibility
+7. false-positive resistance
+
+The long-term target is a tool that can be given an authorized target and independently determine which security procedures are relevant, execute them within policy, and explain a confirmed vulnerability with an auditable evidence chain.
+
+## Safety model
+
+Phobos is intended for authorized testing only. Target selection and scope remain outside the AI planner's authority. Network requests pass through a centralized request boundary with scope and redirect validation, and private destinations require explicit opt-in.
+
+Destructive or state-changing tests must be explicit, bounded, and separated from generic passive discovery.
