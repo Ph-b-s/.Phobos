@@ -7,6 +7,7 @@ from ai_testing import (
     build_indirect_canary,
     build_test_queries,
     new_canary,
+    validate_canary,
 )
 
 
@@ -36,10 +37,12 @@ def test_procedure_is_well_formed():
     INDIRECT_PROMPT_INJECTION_PROCEDURE.validate()
     assert INDIRECT_PROMPT_INJECTION_PROCEDURE.id == "llm.indirect_prompt_injection"
     assert len(INDIRECT_PROMPT_INJECTION_PROCEDURE.steps) == 8
+    assert "canary_observed" in INDIRECT_PROMPT_INJECTION_PROCEDURE.observation_kinds()
 
 
 def test_canary_format_and_queries():
     canary = new_canary()
+    assert validate_canary(canary) == canary
     assert canary.startswith("PHOBOS-")
     assert len(canary) == len("PHOBOS-") + 16
     assert canary in build_indirect_canary(canary)
@@ -50,7 +53,9 @@ def test_canary_format_and_queries():
 
 def test_invalid_canary_is_rejected():
     with pytest.raises(ValueError):
-        build_indirect_canary("not-a-canary")
+        validate_canary("not-a-canary")
+    with pytest.raises(ValueError):
+        build_indirect_canary("PHOBOS-TOO-SHORT")
 
 
 def test_exact_canary_and_baseline_are_required_for_confirmation():
@@ -128,6 +133,11 @@ def test_seed_without_observation_is_not_confirmation():
     )
     assert result.status == "suspected"
     assert result.confidence == 0.45
+
+
+def test_invalid_requested_canary_is_rejected():
+    with pytest.raises(ValueError):
+        IndirectPromptInjectionAnalyzer().analyze([], canary="bad")
 
 
 def test_unknown_observations_do_not_create_finding():
