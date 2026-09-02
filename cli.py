@@ -15,7 +15,7 @@ from models import Asset, AssetType
 from request_manager import RequestError, RequestManager
 from scope import ScopeValidator
 
-PHOBOS_VERSION = "0.3.1"
+PHOBOS_VERSION = "0.3.2"
 DEFAULT_USER_AGENT = f"Phobos/{PHOBOS_VERSION}"
 
 
