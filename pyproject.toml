@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phobos-ai-security"
-version = "0.3.0"
+version = "0.3.1"
 description = "Evidence-driven web and AI security testing framework"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -21,6 +21,7 @@ py-modules = [
     "ai",
     "ai_surface",
     "ai_testing",
+    "assessment_engine",
     "cli",
     "config",
     "crawler",
