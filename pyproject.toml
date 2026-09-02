@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phobos-ai-security"
-version = "0.2.0"
-description = "Web and AI security reconnaissance and attack-surface mapping framework"
+version = "0.3.0"
+description = "Evidence-driven web and AI security testing framework"
 requires-python = ">=3.11"
 readme = "README.md"
 dependencies = []
@@ -28,7 +28,6 @@ py-modules = [
     "graph",
     "models",
     "nodes",
-    "nmap_runner",
     "request_manager",
     "scope",
 ]
