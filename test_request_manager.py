@@ -1,8 +1,6 @@
 """Tests for the single outbound HTTP boundary."""
 from __future__ import annotations
 
-from http.cookiejar import Cookie
-
 import pytest
 
 from request_manager import HTTPResponseData, RequestError, RequestManager
@@ -10,18 +8,20 @@ from scope import ScopeValidator
 
 
 class FakeHTTPResponse:
-    def __init__(self, url: str, status: int, headers: dict[str, str], body: bytes):
-        self._url = url
+    def __init__(self, status: int, headers: list[tuple[str, str]], body: bytes):
         self.status = status
-        self.headers = headers
+        self._headers = headers
         self._body = body
         self.closed = False
 
-    def getcode(self):
-        return self.status
+    def getheader(self, name: str, default=None):
+        for key, value in self._headers:
+            if key.lower() == name.lower():
+                return value
+        return default
 
-    def geturl(self):
-        return self._url
+    def getheaders(self):
+        return list(self._headers)
 
     def read(self, size: int = -1):
         if size < 0:
@@ -34,28 +34,39 @@ class FakeHTTPResponse:
         self.closed = True
 
 
-class FakeOpener:
+class FakeConnection:
     def __init__(self, responses):
         self.responses = iter(responses)
         self.requests = []
+        self.closed = False
 
-    def open(self, request, timeout):
-        self.requests.append((request, timeout))
+    def request(self, method, path, body=None, headers=None):
+        self.requests.append((method, path, body, dict(headers or {})))
+
+    def getresponse(self):
         return next(self.responses)
 
+    def close(self):
+        self.closed = True
 
-def test_request_manager_reads_response_and_closes_resource():
+
+def _manager(monkeypatch, responses, *, allow_private=True):
+    manager = RequestManager(
+        ScopeValidator(("example.com",), allow_private_targets=allow_private),
+    )
+    connection = FakeConnection(responses)
+    monkeypatch.setattr(manager, "_resolve_pinned", lambda url: (__import__("urllib.parse", fromlist=["urlsplit"]).urlsplit(url), "203.0.113.10"))
+    monkeypatch.setattr(manager, "_connection", lambda parsed, resolved_ip: connection)
+    return manager, connection
+
+
+def test_request_manager_reads_response_and_closes_resource(monkeypatch):
     response = FakeHTTPResponse(
-        "https://example.com/",
         200,
-        {"Content-Type": "text/html; charset=utf-8"},
+        [("Content-Type", "text/html; charset=utf-8")],
         b"hello",
     )
-    manager = RequestManager(
-        ScopeValidator(("example.com",), allow_private_targets=True),
-    )
-    opener = FakeOpener([response])
-    manager._opener = opener
+    manager, connection = _manager(monkeypatch, [response])
 
     result = manager.get("https://example.com/")
     assert result == HTTPResponseData(
@@ -66,90 +77,72 @@ def test_request_manager_reads_response_and_closes_resource():
     )
     assert result.text == "hello"
     assert response.closed is True
+    assert connection.closed is True
 
 
-def test_request_manager_follows_in_scope_redirect():
-    first = FakeHTTPResponse(
-        "https://example.com/",
-        302,
-        {"Location": "/next"},
-        b"",
-    )
-    second = FakeHTTPResponse(
-        "https://example.com/next",
-        200,
-        {"Content-Type": "text/plain"},
-        b"ok",
-    )
-    manager = RequestManager(
-        ScopeValidator(("example.com",), allow_private_targets=True),
-    )
-    manager._opener = FakeOpener([first, second])
+def test_request_manager_follows_in_scope_redirect(monkeypatch):
+    first = FakeHTTPResponse(302, [("Location", "/next")], b"")
+    second = FakeHTTPResponse(200, [("Content-Type", "text/plain")], b"ok")
+    manager, connection = _manager(monkeypatch, [first, second])
+
     result = manager.get("https://example.com/")
     assert result.url == "https://example.com/next"
     assert result.body == b"ok"
+    assert [item[1] for item in connection.requests] == ["/", "/next"]
 
 
-def test_request_manager_blocks_out_of_scope_redirect():
-    first = FakeHTTPResponse(
-        "https://example.com/",
-        302,
-        {"Location": "https://evil.example/"},
-        b"",
-    )
-    manager = RequestManager(
-        ScopeValidator(("example.com",), allow_private_targets=True),
-    )
-    manager._opener = FakeOpener([first])
+def test_request_manager_blocks_out_of_scope_redirect(monkeypatch):
+    first = FakeHTTPResponse(302, [("Location", "https://evil.example/")], b"")
+    manager, _ = _manager(monkeypatch, [first])
+
     with pytest.raises(RequestError, match="out-of-scope"):
         manager.get("https://example.com/")
 
 
-def test_request_manager_enforces_body_size_limit():
+def test_request_manager_enforces_body_size_limit(monkeypatch):
     response = FakeHTTPResponse(
-        "https://example.com/",
         200,
-        {"Content-Type": "text/plain", "Content-Length": "6"},
+        [("Content-Type", "text/plain"), ("Content-Length", "6")],
         b"123456",
     )
-    manager = RequestManager(
-        ScopeValidator(("example.com",), allow_private_targets=True),
-        max_response_bytes=5,
-    )
-    manager._opener = FakeOpener([response])
+    manager, _ = _manager(monkeypatch, [response])
+    manager.max_response_bytes = 5
+
     with pytest.raises(RequestError, match="size limit"):
         manager.get("https://example.com/")
     assert response.closed is True
 
 
-def test_request_manager_reset_session_clears_cookie_jar():
-    manager = RequestManager(
-        ScopeValidator(("example.com",), allow_private_targets=True),
-    )
-    manager._cookie_jar.set_cookie(
-        Cookie(
-            version=0,
-            name="session",
-            value="test",
-            port=None,
-            port_specified=False,
-            domain="example.com",
-            domain_specified=True,
-            domain_initial_dot=False,
-            path="/",
-            path_specified=True,
-            secure=True,
-            expires=None,
-            discard=True,
-            comment=None,
-            comment_url=None,
-            rest={},
-            rfc2109=False,
-        )
-    )
-    assert len(manager._cookie_jar) == 1
+def test_request_manager_carries_session_cookie_across_requests(monkeypatch):
+    first = FakeHTTPResponse(200, [("Set-Cookie", "session=abc; Path=/")], b"ok")
+    second = FakeHTTPResponse(200, [], b"ok")
+    manager, connection = _manager(monkeypatch, [first, second])
+
+    manager.get("https://example.com/login")
+    manager.get("https://example.com/account")
+    assert connection.requests[0][3].get("Cookie") is None
+    assert connection.requests[1][3]["Cookie"] == "session=abc"
+
+
+def test_request_manager_reset_session_clears_cookies(monkeypatch):
+    first = FakeHTTPResponse(200, [("Set-Cookie", "session=abc; Path=/")], b"ok")
+    second = FakeHTTPResponse(200, [], b"ok")
+    manager, connection = _manager(monkeypatch, [first, second])
+
+    manager.get("https://example.com/login")
     manager.reset_session()
-    assert len(manager._cookie_jar) == 0
+    manager.get("https://example.com/account")
+    assert connection.requests[1][3].get("Cookie") is None
+
+
+def test_request_manager_uses_pinned_ip_and_original_host(monkeypatch):
+    response = FakeHTTPResponse(200, [], b"ok")
+    manager, connection = _manager(monkeypatch, [response])
+    manager.get("https://example.com:8443/path?x=1")
+    method, path, _, headers = connection.requests[0]
+    assert method == "GET"
+    assert path == "/path?x=1"
+    assert headers["Host"] == "example.com:8443"
 
 
 def test_request_manager_rejects_invalid_configuration():
