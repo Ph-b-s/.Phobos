@@ -1,6 +1,8 @@
 """Tests for the single outbound HTTP boundary."""
 from __future__ import annotations
 
+from http.cookiejar import Cookie
+
 import pytest
 
 from request_manager import HTTPResponseData, RequestError, RequestManager
@@ -124,8 +126,28 @@ def test_request_manager_reset_session_clears_cookie_jar():
     manager = RequestManager(
         ScopeValidator(("example.com",), allow_private_targets=True),
     )
-    manager._cookie_jar.set_cookie_next(None)
-    assert len(manager._cookie_jar) == 0
+    manager._cookie_jar.set_cookie(
+        Cookie(
+            version=0,
+            name="session",
+            value="test",
+            port=None,
+            port_specified=False,
+            domain="example.com",
+            domain_specified=True,
+            domain_initial_dot=False,
+            path="/",
+            path_specified=True,
+            secure=True,
+            expires=None,
+            discard=True,
+            comment=None,
+            comment_url=None,
+            rest={},
+            rfc2109=False,
+        )
+    )
+    assert len(manager._cookie_jar) == 1
     manager.reset_session()
     assert len(manager._cookie_jar) == 0
 
