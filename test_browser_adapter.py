@@ -16,7 +16,7 @@ def test_browser_limits_are_bounded():
         BrowserLimits(navigation_timeout_ms=99)
 
 
-def test_network_record_never_emits_query_or_fragment_data():
+def test_network_record_redacts_query_and_fragment_from_evidence():
     record = NetworkRecord(
         event="response",
         method="GET",
@@ -27,7 +27,7 @@ def test_network_record_never_emits_query_or_fragment_data():
     observation = record.to_observation()
     assert "token=secret" not in observation.description
     assert "#fragment" not in observation.description
-    assert observation.metadata["url"] == "https://example.com/account?token=secret#fragment"
+    assert observation.metadata["url"] == "https://example.com/account"
 
 
 def test_browser_adapter_error_is_specific_runtime_error():
