@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-PHOBOS_VERSION = "0.3.1"
+PHOBOS_VERSION = "0.3.2"
 DEFAULT_USER_AGENT = f"Phobos/{PHOBOS_VERSION}"
 
 
