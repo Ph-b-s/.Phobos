@@ -22,11 +22,11 @@ Phobos is an open-source framework for authorized security testing of modern web
 
 ## Status
 
-Phobos is in **early development**. The current codebase provides a bounded web reconnaissance core, passive AI-surface discovery, an AI planning layer, and the first evidence-driven active assessment procedure for indirect prompt injection.
+Phobos is in **early development**. The current codebase provides a bounded web reconnaissance core, passive AI-surface discovery, an AI planning layer, a reusable assessment procedure model, a bounded assessment engine, and the first evidence-driven active assessment procedure for indirect prompt injection.
 
 The goal is not to build a payload dictionary or a generic chatbot scanner. The goal is to build a system that can **discover an application's AI attack surface, execute a structured security procedure, correlate observations across multiple requests and components, and report a vulnerability only when the evidence supports it**.
 
-The current PortSwigger-inspired indirect prompt-injection work is implemented as reusable assessment primitives. An end-to-end browser/session execution adapter is still required to run a live application through the complete procedure.
+The current PortSwigger-inspired indirect prompt-injection work is implemented as reusable assessment primitives. A browser/session execution adapter is still required to connect those primitives to a complete live-application workflow.
 
 ---
 
@@ -84,15 +84,19 @@ That distinction is central to Phobos.
 
 # Security assessment model
 
-Phobos separates **mechanism**, **procedure**, and **finding logic**.
+Phobos separates **mechanism**, **procedure**, **orchestration**, and **finding logic**.
 
 ### Mechanism
 
-The browser/HTTP layer performs navigation, requests, authentication, form interaction, and observation capture.
+A future browser/HTTP adapter performs navigation, requests, authentication, form interaction, and observation capture. The existing request manager remains the single outbound HTTP boundary for direct HTTP traffic.
 
 ### Procedure
 
 A vulnerability-specific workflow describes what must be discovered and tested. Procedures are reusable and are not tied to a single lab URL or product name.
+
+### Orchestration
+
+The bounded assessment engine dispatches only declared procedure steps, enforces execution and observation limits, rejects malformed adapter output, records step failures, and blocks state-changing validation unless it is explicitly enabled.
 
 ### Finding logic
 
@@ -113,6 +117,10 @@ The analyzer correlates observations and determines whether evidence is merely s
                           ↓
                 ┌─────────────────────┐
                 │ Assessment Procedure│
+                └─────────┬───────────┘
+                          ↓
+                ┌─────────────────────┐
+                │ Assessment Engine   │
                 └─────────┬───────────┘
                           ↓
                 ┌─────────────────────┐
@@ -209,6 +217,24 @@ confirmed influence
 
 A correlated state-changing action can raise the confidence of an already proven injection path and provide impact evidence. The assessment module enforces canary format validation and exact seed/observation correlation.
 
+### Execution safety
+
+The assessment engine adds hard execution boundaries:
+
+```text
+procedure limit
+      +
+observation limit
+      +
+validated adapter output
+      +
+explicit state-change opt-in
+      ↓
+bounded assessment run
+```
+
+This keeps destructive validation separate from ordinary reconnaissance and prevents an incomplete adapter from silently becoming a broad execution primitive.
+
 ### Why this matters
 
 This prevents a common scanner failure mode:
@@ -289,13 +315,14 @@ an unauthorized or security-relevant model-mediated action?"
 
 # Architecture
 
-The current project intentionally keeps the source layout simple while the engine is being established:
+The source layout is intentionally flat while the engine is being established:
 
 ```text
 .Phobos/
 ├── ai.py
 ├── ai_surface.py
 ├── ai_testing.py
+├── assessment_engine.py
 ├── cli.py
 ├── config.py
 ├── crawler.py
@@ -325,6 +352,8 @@ Reconnaissance
 Asset + Relationship Graph
  ↓
 Assessment Procedure
+ ↓
+Assessment Engine
  ↓
 Execution Adapter
  ↓
@@ -395,7 +424,7 @@ The current AI planner can select only predefined reconnaissance actions. It can
 
 ### Important current limitation
 
-The CLI has **not yet been promoted to a full autonomous assessment runner**. The active assessment engine is currently a reusable procedure/correlation layer. A browser/session adapter is the next major implementation step.
+The CLI has **not yet been promoted to a full autonomous assessment runner**. The assessment engine is ready to orchestrate declared procedures, but a real browser/session adapter and assessment CLI command are still required for end-to-end application execution.
 
 That distinction is intentional and documented so the project does not overstate its current capabilities.
 
@@ -413,7 +442,7 @@ Current reconnaissance runs store:
 └── findings.json
 ```
 
-Active assessments will extend this model with structured evidence such as:
+Assessment runs will extend this model with structured evidence such as:
 
 ```text
 assessment.json
@@ -487,6 +516,8 @@ Active testing should remain distinguishable from passive discovery, and destruc
 - [x] unique canary generation
 - [x] indirect prompt-injection procedure
 - [x] regression tests for mismatched canaries / missing baselines
+- [x] bounded assessment orchestration
+- [x] explicit state-change safety gate
 - [ ] first browser/session execution adapter
 - [ ] authenticated session lifecycle
 - [ ] safe form interaction
