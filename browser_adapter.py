@@ -47,7 +47,8 @@ class NetworkRecord:
     error: str | None = None
 
     def to_observation(self) -> Observation:
-        detail = f"{self.event}: {self.method} {self.url}"
+        safe_url = _safe_url(self.url)
+        detail = f"{self.event}: {self.method} {safe_url}"
         if self.status is not None:
             detail += f" [{self.status}]"
         if self.error:
@@ -59,7 +60,7 @@ class NetworkRecord:
             metadata={
                 "event": self.event,
                 "method": self.method,
-                "url": self.url,
+                "url": safe_url,
                 "resource_type": self.resource_type,
                 "status": self.status,
             },
@@ -94,13 +95,14 @@ class PlaywrightBrowserSession:
         limits: BrowserLimits | None = None,
         headless: bool = True,
         browser_name: str = "chromium",
-        user_agent: str = "Phobos/0.3.1",
+        user_agent: str = "Phobos/0.3.2",
     ) -> None:
         self.scope = scope
         self.limits = limits or BrowserLimits()
         self._closed = False
         self._requests_seen = 0
         self._records: list[NetworkRecord] = []
+        self._blocked_reason: str | None = None
         self._playwright = None
         self._browser = None
         self._context = None
@@ -141,14 +143,22 @@ class PlaywrightBrowserSession:
         request = route.request
         self._requests_seen += 1
         if self._requests_seen > self.limits.max_requests:
+            self._blocked_reason = "browser request limit exceeded"
             route.abort("blockedbyclient")
-            raise BrowserAdapterError("browser request limit exceeded")
+            return
         try:
             self.scope.validate(request.url)
         except ScopeError as exc:
+            self._blocked_reason = f"browser request blocked: {exc}"
             route.abort("blockedbyclient")
-            raise BrowserAdapterError(f"browser request blocked: {exc}") from exc
+            return
         route.continue_()
+
+    def _check_blocked(self) -> None:
+        if self._blocked_reason:
+            reason = self._blocked_reason
+            self._blocked_reason = None
+            raise BrowserAdapterError(reason)
 
     def _on_response(self, response: Any) -> None:
         if len(self._records) >= MAX_NETWORK_RECORDS:
@@ -158,7 +168,7 @@ class PlaywrightBrowserSession:
             NetworkRecord(
                 event="response",
                 method=request.method,
-                url=_safe_url(response.url),
+                url=response.url,
                 resource_type=request.resource_type,
                 status=response.status,
             )
@@ -171,7 +181,7 @@ class PlaywrightBrowserSession:
             NetworkRecord(
                 event="request_failed",
                 method=request.method,
-                url=_safe_url(request.url),
+                url=request.url,
                 resource_type=request.resource_type,
                 error=request.failure,
             )
@@ -180,6 +190,7 @@ class PlaywrightBrowserSession:
     def _require_open(self) -> Any:
         if self._closed or self._page is None:
             raise BrowserAdapterError("browser session is closed")
+        self._check_blocked()
         return self._page
 
     def goto(self, url: str) -> str:
@@ -187,7 +198,9 @@ class PlaywrightBrowserSession:
         try:
             validated = self.scope.validate(url)
             response = page.goto(validated, wait_until="domcontentloaded")
+            self._check_blocked()
             if response is None:
+                self.scope.validate(page.url)
                 return page.url
             self.scope.validate(page.url)
             return page.url
@@ -206,11 +219,13 @@ class PlaywrightBrowserSession:
         if not selector.strip():
             raise ValueError("selector must not be empty")
         self._require_open().locator(selector).fill(value)
+        self._check_blocked()
 
     def click(self, selector: str) -> None:
         if not selector.strip():
             raise ValueError("selector must not be empty")
         self._require_open().locator(selector).click()
+        self._check_blocked()
 
     def network_observations(self) -> tuple[Observation, ...]:
         return tuple(record.to_observation() for record in self._records)
