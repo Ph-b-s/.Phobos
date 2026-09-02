@@ -8,13 +8,12 @@ and an explicit opt-in for state-changing validation.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Callable, Iterable, Mapping, Protocol
+from typing import Any, Iterable, Mapping, Protocol
 
 from ai_testing import (
     INDIRECT_PROMPT_INJECTION_PROCEDURE,
     AssessmentProcedure,
     AssessmentResult,
-    AssessmentStep,
     IndirectPromptInjectionAnalyzer,
     Observation,
 )
@@ -150,15 +149,24 @@ class AssessmentEngine:
 
             try:
                 emitted = handler(context)
-                added = 0
+                batch: list[Observation] = []
                 for observation in emitted:
                     if not isinstance(observation, Observation):
                         raise TypeError("assessment handlers must emit Observation instances")
-                    if len(observations) >= self.max_observations:
+                    if len(observations) + len(batch) >= self.max_observations:
                         raise RuntimeError("assessment observation limit exceeded")
-                    observations.append(observation)
-                    added += 1
-                executions.append(StepExecution(step.id, "completed", added))
+                    batch.append(observation)
+
+                observed_kinds = {item.kind for item in batch}
+                missing = set(step.required_observations) - observed_kinds
+                if missing:
+                    missing_text = ", ".join(sorted(missing))
+                    raise ValueError(
+                        f"step {step.id} did not emit required observations: {missing_text}"
+                    )
+
+                observations.extend(batch)
+                executions.append(StepExecution(step.id, "completed", len(batch)))
             except Exception as exc:
                 message = f"{step.id}: {type(exc).__name__}: {exc}"
                 if len(errors) < MAX_ERRORS:
