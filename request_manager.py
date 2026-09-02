@@ -2,17 +2,18 @@
 from __future__ import annotations
 
 import http.client
+import ipaddress
 import socket
 import ssl
 from dataclasses import dataclass
 from http.cookies import Morsel, SimpleCookie
-from urllib.error import URLError
 from urllib.parse import urljoin, urlsplit
 
+from config import PHOBOS_VERSION
 from scope import ScopeError, ScopeValidator
 
 
-PHOBOS_HTTP_USER_AGENT = "Phobos/0.3.2"
+PHOBOS_HTTP_USER_AGENT = f"Phobos/{PHOBOS_VERSION}"
 REDIRECT_STATUSES = {301, 302, 303, 307, 308}
 
 
@@ -60,10 +61,7 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
         self._resolved_ip = resolved_ip
 
     def connect(self) -> None:
-        self.sock = socket.create_connection(
-            (self._resolved_ip, self.port),
-            self.timeout,
-        )
+        self.sock = socket.create_connection((self._resolved_ip, self.port), self.timeout)
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -81,12 +79,12 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self._resolved_ip = resolved_ip
 
     def connect(self) -> None:
-        raw_socket = socket.create_connection(
-            (self._resolved_ip, self.port),
-            self.timeout,
-        )
+        raw_socket = socket.create_connection((self._resolved_ip, self.port), self.timeout)
         try:
-            self.sock = self._context.wrap_socket(raw_socket, server_hostname=self._tunnel_host or self.host)
+            self.sock = self._context.wrap_socket(
+                raw_socket,
+                server_hostname=self._tunnel_host or self.host,
+            )
         except Exception:
             raw_socket.close()
             raise
@@ -95,10 +93,10 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
 class RequestManager:
     """The only component allowed to make outbound HTTP requests.
 
-    Hostnames are resolved once per request and the selected address is pinned
-    into the actual TCP connection. HTTPS keeps the original hostname for
-    Host/SNI/certificate validation. This closes the DNS TOCTOU window that
-    exists when validation and connection perform independent hostname lookups.
+    Each request is scope-validated, resolved once, checked for a permitted
+    destination, and then connected to that exact IP. HTTPS retains the original
+    hostname for Host/SNI/certificate validation. Redirect destinations repeat
+    the complete validation and pinning process.
     """
 
     def __init__(
@@ -170,26 +168,23 @@ class RequestManager:
                 self._store_cookies(parsed, response.getheaders())
 
                 status = response.status
-                final = self._validate(current)
                 location = response.getheader("Location")
                 if location and status in REDIRECT_STATUSES:
                     if count >= self.max_redirects:
                         raise RequestError(f"maximum redirects exceeded for {url}")
-                    current = self._validate(urljoin(final, location))
+                    current = self._validate(urljoin(current, location))
                     if status == 303 or (status in {301, 302} and method == "POST"):
                         method = "GET"
                         body = None
                     continue
 
                 return HTTPResponseData(
-                    final,
+                    current,
                     status,
                     {key.lower(): value for key, value in response.getheaders()},
                     self._read_limited(response),
                 )
             except (OSError, ssl.SSLError) as exc:
-                raise RequestError(f"request failed for {current}: {exc}") from exc
-            except (URLError, TimeoutError) as exc:
                 raise RequestError(f"request failed for {current}: {exc}") from exc
             finally:
                 if response is not None:
@@ -215,53 +210,30 @@ class RequestManager:
             raise RequestError("URL contains an invalid port") from exc
 
         try:
-            literal = socket.inet_pton(socket.AF_INET, host)
-            del literal
-            addresses = (host,)
-        except OSError:
+            addresses = (str(ipaddress.ip_address(host)),)
+        except ValueError:
             try:
-                literal = socket.inet_pton(socket.AF_INET6, host)
-                del literal
-                addresses = (host,)
-            except OSError:
-                try:
-                    results = socket.getaddrinfo(
-                        host,
-                        port,
-                        type=socket.SOCK_STREAM,
-                    )
-                except OSError as exc:
-                    raise RequestError(f"could not resolve destination safely: {host}") from exc
-                addresses = tuple(dict.fromkeys(result[4][0] for result in results))
+                results = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
+            except OSError as exc:
+                raise RequestError(f"could not resolve destination safely: {host}") from exc
+            addresses = tuple(dict.fromkeys(result[4][0] for result in results))
 
         if not addresses:
             raise RequestError(f"destination has no resolvable address: {host}")
-
-        if not self.scope.allow_private_targets:
-            try:
-                candidates = [socket.inet_pton(socket.AF_INET, ip) for ip in addresses]
-                del candidates
-                public = all(self._is_global_ip(ip) for ip in addresses)
-            except OSError:
-                public = all(self._is_global_ip(ip) for ip in addresses)
-            if not public:
-                raise RequestError("destination resolves to a non-public IP address")
+        if not self.scope.allow_private_targets and any(
+            not ipaddress.ip_address(address).is_global for address in addresses
+        ):
+            raise RequestError("destination resolves to a non-public IP address")
 
         return parsed, addresses[0]
-
-    @staticmethod
-    def _is_global_ip(value: str) -> bool:
-        import ipaddress
-
-        return ipaddress.ip_address(value).is_global
 
     @staticmethod
     def _host_header(parsed) -> str:
         host = parsed.hostname or ""
         default_port = 443 if parsed.scheme.lower() == "https" else 80
         if parsed.port and parsed.port != default_port:
-            return f"{host}:{parsed.port}"
-        return host
+            return f"[{host}]" if ":" in host else f"{host}:{parsed.port}"
+        return f"[{host}]" if ":" in host else host
 
     def _connection(self, parsed, resolved_ip: str):
         host = parsed.hostname or ""
@@ -312,7 +284,8 @@ class RequestManager:
                 secure = bool(morsel["secure"])
                 if morsel["max-age"].strip() in {"0", "-1"}:
                     self._cookies = [
-                        cookie for cookie in self._cookies
+                        cookie
+                        for cookie in self._cookies
                         if not (
                             cookie.name == name
                             and cookie.domain == cookie_domain
@@ -322,7 +295,8 @@ class RequestManager:
                     continue
                 replacement = _SessionCookie(name, morsel.value, cookie_domain, cookie_path, secure)
                 self._cookies = [
-                    cookie for cookie in self._cookies
+                    cookie
+                    for cookie in self._cookies
                     if not (
                         cookie.name == name
                         and cookie.domain == cookie_domain
