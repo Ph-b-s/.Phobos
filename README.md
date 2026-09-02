@@ -132,7 +132,7 @@ The analyzer correlates observations and determines whether evidence is merely s
                    Finding + Proof
 ```
 
-The LLM planner is constrained to predefined Phobos capabilities. It does not control the target, scope, shell, or arbitrary request construction. fileciteturn5file0
+The AI planner is constrained to predefined Phobos capabilities. It does not control the target, scope, shell, or arbitrary request construction.
 
 ---
 
@@ -152,9 +152,9 @@ agent/tool signals
 AI-oriented inputs
 ```
 
-AI-surface detection is intentionally conservative. A signal is an indication that deeper testing may be relevant; it is **not a vulnerability finding**. fileciteturn4file0
+AI-surface detection is intentionally conservative. A signal is an indication that deeper testing may be relevant; it is **not a vulnerability finding**.
 
-The current crawler also preserves assets and relationships in an execution graph and stores bounded JSON evidence. fileciteturn6file0 fileciteturn11file0
+The current crawler preserves assets and relationships in an execution graph and stores bounded JSON evidence.
 
 ---
 
@@ -207,7 +207,7 @@ clean baseline comparison
 confirmed influence
 ```
 
-A correlated state-changing action can raise the confidence of an already proven injection path and provide impact evidence. The assessment module enforces canary format validation and exact seed/observation correlation. fileciteturn41file0
+A correlated state-changing action can raise the confidence of an already proven injection path and provide impact evidence. The assessment module enforces canary format validation and exact seed/observation correlation.
 
 ### Why this matters
 
@@ -335,7 +335,7 @@ Evidence Correlation
 Findings / Reports
 ```
 
-The request manager remains the single outbound HTTP boundary and enforces scope, redirect validation, request limits, and response limits. fileciteturn9file0
+The request manager remains the single outbound HTTP boundary and enforces scope, redirect validation, request limits, and response limits.
 
 ---
 
@@ -391,7 +391,7 @@ phobos ai \
   "Map the application and identify likely AI attack surfaces."
 ```
 
-The current AI planner can select only predefined reconnaissance actions. It cannot change the target, execute shell commands, or provide arbitrary HTTP arguments. fileciteturn5file0
+The current AI planner can select only predefined reconnaissance actions. It cannot change the target, execute shell commands, or provide arbitrary HTTP arguments.
 
 ### Important current limitation
 
@@ -455,7 +455,7 @@ Controlled execution adapter
 Evidence
 ```
 
-Private/local targets remain opt-in. The current HTTP stack validates redirects against scope and blocks non-public destinations unless explicitly enabled. fileciteturn13file0
+Private/local targets remain opt-in. The current HTTP stack validates redirects against scope and blocks non-public destinations unless explicitly enabled.
 
 Active testing should remain distinguishable from passive discovery, and destructive actions should require an explicit authorization mode rather than being an accidental side effect of generic scanning.
 
