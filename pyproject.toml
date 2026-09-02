@@ -20,6 +20,7 @@ phobos = "cli:main"
 py-modules = [
     "ai",
     "ai_surface",
+    "ai_testing",
     "cli",
     "config",
     "crawler",
