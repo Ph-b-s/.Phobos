@@ -5,7 +5,7 @@ import argparse
 import threading
 
 from assessment_engine import AssessmentEngine
-from ai_testing import build_indirect_canary, build_test_queries, new_canary
+from ai_testing import INDIRECT_PROMPT_INJECTION_PROCEDURE, Observation, build_indirect_canary, new_canary
 from browser_adapter import BrowserAdapterError, PlaywrightBrowserSession
 from demo_target import start_demo_server
 from scope import ScopeValidator
@@ -23,24 +23,31 @@ def main() -> int:
     try:
         scope = ScopeValidator(("127.0.0.1",), allow_private_targets=True)
         canary = new_canary()
-        baseline: dict[str, str] = {}
+        state: dict[str, str] = {}
         session = PlaywrightBrowserSession(scope, headless=True)
         try:
             def discover_chat(_):
                 session.goto(f"{target}/chat?product=demo")
+                state["baseline"] = session.text()
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "chat_surface",
                         "local live-chat surface discovered",
                         source="demo",
                         evidence=(session.title(),),
-                    )
+                    ),
+                    Observation(
+                        "baseline_compared",
+                        "clean baseline captured before any canary was seeded",
+                        source="demo",
+                        evidence=(state["baseline"],),
+                    ),
                 ]
 
             def map_ai_api(_):
                 session.goto(f"{target}/capabilities")
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "tool_inventory",
                         "demo exposes delete_account capability",
                         source="demo",
@@ -50,9 +57,9 @@ def main() -> int:
 
             def map_tool_arguments(_):
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "tool_arguments",
-                        "demo delete_account requires the authenticated session",
+                        "demo delete_account uses the authenticated session identity",
                         source="demo",
                     )
                 ]
@@ -61,10 +68,10 @@ def main() -> int:
                 session.goto(f"{target}/login")
                 session.fill('input[name="username"]', "phobos-test")
                 session.fill('input[name="password"]', "phobos-test")
-                session.click('button')
+                session.click("button")
                 session.goto(f"{target}/account")
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "authenticated_tool_execution",
                         "assessment identity is authenticated and account is active",
                         source="demo",
@@ -75,7 +82,7 @@ def main() -> int:
             def discover_indirect_input(_):
                 session.goto(f"{target}/review")
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "indirect_input_source",
                         "stored review content is consumed by the live chat",
                         source="demo",
@@ -85,10 +92,10 @@ def main() -> int:
             def seed_canary(_):
                 session.goto(f"{target}/review")
                 session.fill('input[name="product"]', "demo")
-                session.fill("textarea[name=\"review\"]", build_indirect_canary(canary))
-                session.click('button')
+                session.fill('textarea[name="review"]', build_indirect_canary(canary))
+                session.click("button")
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "canary_seeded",
                         "unique canary stored in the indirect review source",
                         source="demo",
@@ -98,64 +105,58 @@ def main() -> int:
 
             def prove_influence(_):
                 session.goto(f"{target}/chat?product=demo")
-                baseline["text"] = session.text()
-                session.goto(f"{target}/chat?product=demo")
-                text = session.text()
-                observations = [
-                    __import__("ai_testing").Observation(
-                        "baseline_compared",
-                        "clean baseline captured before induced observation",
+                observed = session.text()
+                if canary not in observed:
+                    raise RuntimeError("expected canary was not observed through the demo LLM workflow")
+                if canary in state["baseline"]:
+                    raise RuntimeError("baseline unexpectedly contained the seeded canary")
+                return [
+                    Observation(
+                        "canary_observed",
+                        "exact canary returned through the LLM workflow",
                         source="demo",
-                        evidence=(baseline["text"],),
+                        evidence=(observed,),
+                        canary=canary,
                     )
                 ]
-                if canary in text and canary not in baseline["text"]:
-                    observations.append(
-                        __import__("ai_testing").Observation(
-                            "canary_observed",
-                            "exact canary returned through the LLM workflow",
-                            source="demo",
-                            evidence=(text,),
-                            canary=canary,
-                        )
-                    )
-                return observations
 
             def validate_impact(_):
                 session.goto(f"{target}/chat?product=demo&impact=1")
                 chat = session.text()
                 session.goto(f"{target}/account")
+                account = session.text()
+                if "TOOL_CALL: delete_account" not in chat or "deleted" not in account:
+                    raise RuntimeError("demo state change was not validated")
                 return [
-                    __import__("ai_testing").Observation(
+                    Observation(
                         "state_change_validated",
                         "same influenced path caused the controlled demo account state change",
                         source="demo",
-                        evidence=(chat, session.text()),
+                        evidence=(chat, account),
                         canary=canary,
                     )
                 ]
 
-            handlers = {
-                "discover_chat": discover_chat,
-                "map_ai_api": map_ai_api,
-                "map_tool_arguments": map_tool_arguments,
-                "establish_auth_boundary": establish_auth_boundary,
-                "discover_indirect_input": discover_indirect_input,
-                "seed_canary": seed_canary,
-                "prove_influence": prove_influence,
-                "validate_impact": validate_impact,
-            }
-
             run = AssessmentEngine().run(
-                __import__("ai_testing").INDIRECT_PROMPT_INJECTION_PROCEDURE,
-                handlers,
+                INDIRECT_PROMPT_INJECTION_PROCEDURE,
+                {
+                    "discover_chat": discover_chat,
+                    "map_ai_api": map_ai_api,
+                    "map_tool_arguments": map_tool_arguments,
+                    "establish_auth_boundary": establish_auth_boundary,
+                    "discover_indirect_input": discover_indirect_input,
+                    "seed_canary": seed_canary,
+                    "prove_influence": prove_influence,
+                    "validate_impact": validate_impact,
+                },
                 canary=canary,
                 allow_state_change=args.impact,
                 metadata={"target": target, "demo": True},
             )
+            print(f"target={target}")
+            print(f"canary={canary}")
             print(run.result.to_dict())
-            print(f"queries={build_test_queries('demo')}")
-            return 0 if run.result.status in {"confirmed", "strong_signal", "suspected", "not_confirmed"} else 2
+            return 0
         finally:
             session.close()
     except BrowserAdapterError as exc:
