@@ -2,11 +2,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
 from urllib.parse import urljoin
-from urllib.request import HTTPRedirectHandler, Request, build_opener
+from urllib.request import (
+    HTTPRedirectHandler,
+    HTTPCookieProcessor,
+    Request,
+    build_opener,
+)
 
 from scope import ScopeError, ScopeValidator
+
+
+PHOBOS_HTTP_USER_AGENT = "Phobos/0.3.1"
 
 
 class RequestError(RuntimeError):
@@ -54,7 +63,12 @@ class HTTPResponseData:
 
 
 class RequestManager:
-    """The only component allowed to make outbound HTTP requests."""
+    """The only component allowed to make outbound HTTP requests.
+
+    A manager owns one bounded cookie jar, allowing authenticated multi-request
+    assessment flows without exposing a global session. ``reset_session``
+    explicitly clears that state between identities or test runs.
+    """
 
     def __init__(
         self,
@@ -62,7 +76,7 @@ class RequestManager:
         *,
         timeout: float = 10.0,
         max_redirects: int = 5,
-        user_agent: str = "Phobos/0.2",
+        user_agent: str = PHOBOS_HTTP_USER_AGENT,
         max_response_bytes: int = 2_000_000,
     ):
         if timeout <= 0:
@@ -78,7 +92,18 @@ class RequestManager:
         self.max_redirects = max_redirects
         self.user_agent = user_agent
         self.max_response_bytes = max_response_bytes
-        self._opener = build_opener(_NoRedirectHandler())
+        self._cookie_jar = CookieJar()
+        self._opener = self._build_opener()
+
+    def _build_opener(self):
+        return build_opener(
+            _NoRedirectHandler(),
+            HTTPCookieProcessor(self._cookie_jar),
+        )
+
+    def reset_session(self) -> None:
+        """Clear authentication/session cookies while keeping transport settings."""
+        self._cookie_jar.clear()
 
     def get(self, url: str, *, headers: dict[str, str] | None = None) -> HTTPResponseData:
         return self.request("GET", url, headers=headers)
