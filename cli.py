@@ -15,7 +15,8 @@ from models import Asset, AssetType
 from request_manager import RequestError, RequestManager
 from scope import ScopeValidator
 
-PHOBOS_VERSION = "0.2.0"
+PHOBOS_VERSION = "0.3.1"
+DEFAULT_USER_AGENT = f"Phobos/{PHOBOS_VERSION}"
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--timeout", type=float, default=10.0)
     scan.add_argument("--max-pages", type=int, default=100)
     scan.add_argument("--max-discovered-urls", type=int, default=5_000)
-    scan.add_argument("--user-agent", default="Phobos/0.2")
+    scan.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     scan.add_argument("--allow-private-targets", action="store_true")
 
     agent = sub.add_parser(
@@ -47,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--timeout", type=float, default=10.0)
     agent.add_argument("--max-pages", type=int, default=100)
     agent.add_argument("--max-discovered-urls", type=int, default=5_000)
-    agent.add_argument("--user-agent", default="Phobos/0.2")
+    agent.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     agent.add_argument("--dry-run", action="store_true", help="plan only; do not send web requests")
     agent.add_argument("--allow-private-targets", action="store_true")
 
