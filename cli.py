@@ -7,16 +7,13 @@ import sys
 from urllib.parse import urlparse
 
 from ai import AIConfig, AIError, VeniceClient
-from config import ScanConfig
+from config import DEFAULT_USER_AGENT, PHOBOS_VERSION, ScanConfig
 from crawler import ReconCrawler
 from evidence import EvidenceStore
 from graph import Graph
 from models import Asset, AssetType
 from request_manager import RequestError, RequestManager
 from scope import ScopeValidator
-
-PHOBOS_VERSION = "0.3.2"
-DEFAULT_USER_AGENT = f"Phobos/{PHOBOS_VERSION}"
 
 
 def build_parser() -> argparse.ArgumentParser:
