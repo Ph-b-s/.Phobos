@@ -9,12 +9,20 @@ import html
 import secrets
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlencode, urlparse
+from urllib.parse import parse_qs, urlparse
 
 
 USERS = {"phobos-test": {"password": "phobos-test", "deleted": False}}
 REVIEWS: list[tuple[str, str]] = []
 SESSIONS: dict[str, str] = {}
+
+
+def _reset_demo_state() -> None:
+    """Restore deterministic initial state before every demo server run."""
+    USERS.clear()
+    USERS["phobos-test"] = {"password": "phobos-test", "deleted": False}
+    REVIEWS.clear()
+    SESSIONS.clear()
 
 
 def _page(title: str, body: str) -> bytes:
@@ -41,7 +49,7 @@ class DemoHandler(BaseHTTPRequestHandler):
                 return SESSIONS[value]
         return None
 
-    def _send(self, body: bytes, *, status: int = 200, headers: dict[str, str] | None = None) -> None:
+    def _send(self, body: bytes, *, status: int = HTTPStatus.OK, headers: dict[str, str] | None = None) -> None:
         self.send_response(status)
         for key, value in (headers or {}).items():
             self.send_header(key, value)
@@ -90,10 +98,10 @@ class DemoHandler(BaseHTTPRequestHandler):
             return
         if parsed.path == "/account":
             if not user:
-                self._send(_page("Account", "not authenticated"), status=401)
+                self._send(_page("Account", "not authenticated"), status=HTTPStatus.UNAUTHORIZED)
                 return
             deleted = USERS.get(user, {}).get("deleted", True)
-            self._send(_page("Account", "deleted" if deleted else "active"), status=200)
+            self._send(_page("Account", "deleted" if deleted else "active"))
             return
         if parsed.path == "/chat":
             product = query.get("product", ["demo"])[0]
@@ -109,10 +117,18 @@ class DemoHandler(BaseHTTPRequestHandler):
             self._send(_page("Live chat", response))
             return
 
-        self._send(_page("Not found", "not found"), status=404)
+        self._send(_page("Not found", "not found"), status=HTTPStatus.NOT_FOUND)
 
     def do_POST(self) -> None:
-        length = int(self.headers.get("Content-Length", "0"))
+        try:
+            length = int(self.headers.get("Content-Length", "0"))
+        except ValueError:
+            self._send(_page("Bad request", "invalid content length"), status=HTTPStatus.BAD_REQUEST)
+            return
+        if length < 0:
+            self._send(_page("Bad request", "invalid content length"), status=HTTPStatus.BAD_REQUEST)
+            return
+
         raw = self.rfile.read(length).decode(errors="replace")
         form = {key: values[0] for key, values in parse_qs(raw).items()}
         parsed = urlparse(self.path)
@@ -121,7 +137,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             username = form.get("username", "")
             password = form.get("password", "")
             if USERS.get(username, {}).get("password") != password:
-                self._send(_page("Login", "invalid credentials"), status=401)
+                self._send(_page("Login", "invalid credentials"), status=HTTPStatus.UNAUTHORIZED)
                 return
             token = secrets.token_hex(16)
             SESSIONS[token] = username
@@ -133,7 +149,7 @@ class DemoHandler(BaseHTTPRequestHandler):
 
         if parsed.path == "/review":
             if not self._session_user():
-                self._send(_page("Review", "authentication required"), status=401)
+                self._send(_page("Review", "authentication required"), status=HTTPStatus.UNAUTHORIZED)
                 return
             product = form.get("product", "demo")
             review = form.get("review", "")
@@ -141,7 +157,7 @@ class DemoHandler(BaseHTTPRequestHandler):
             self._send(_page("Review", "saved"))
             return
 
-        self._send(_page("Not found", "not found"), status=404)
+        self._send(_page("Not found", "not found"), status=HTTPStatus.NOT_FOUND)
 
 
 def _extract_marker(value: str) -> str | None:
@@ -153,6 +169,7 @@ def _extract_marker(value: str) -> str | None:
 
 
 def start_demo_server() -> tuple[ThreadingHTTPServer, str]:
+    _reset_demo_state()
     server = ThreadingHTTPServer(("127.0.0.1", 0), DemoHandler)
     return server, f"http://127.0.0.1:{server.server_address[1]}"
 
