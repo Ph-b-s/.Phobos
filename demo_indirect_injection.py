@@ -99,7 +99,7 @@ def main() -> int:
                         "canary_seeded",
                         "unique canary stored in the indirect review source",
                         source="demo",
-                        canary=canary,
+                        metadata={"canary": canary},
                     )
                 ]
 
@@ -116,7 +116,7 @@ def main() -> int:
                         "exact canary returned through the LLM workflow",
                         source="demo",
                         evidence=(observed,),
-                        canary=canary,
+                        metadata={"canary": canary},
                     )
                 ]
 
@@ -133,7 +133,7 @@ def main() -> int:
                         "same influenced path caused the controlled demo account state change",
                         source="demo",
                         evidence=(chat, account),
-                        canary=canary,
+                        metadata={"canary": canary},
                     )
                 ]
 
