@@ -100,6 +100,29 @@ def test_step_must_emit_its_declared_observation():
     assert run.result.status == "not_confirmed"
 
 
+def test_later_step_can_rely_on_prior_observation():
+    """A procedure can deliberately capture baseline evidence before induced evidence."""
+    canary = new_canary()
+    handlers = _handlers(canary)
+    handlers["discover_chat"] = lambda _: [
+        _obs("chat_surface", "chat discovered"),
+        _obs("baseline_compared", "clean baseline captured first"),
+    ]
+    handlers["prove_influence"] = lambda _: [
+        _obs("canary_observed", "exact canary returned", canary=canary),
+    ]
+
+    run = AssessmentEngine().run(
+        INDIRECT_PROMPT_INJECTION_PROCEDURE,
+        handlers,
+        canary=canary,
+    )
+
+    prove_step = next(step for step in run.steps if step.step_id == "prove_influence")
+    assert prove_step.status == "completed"
+    assert run.result.status == "confirmed"
+
+
 def test_observation_input_is_hardened():
     with pytest.raises(ValueError):
         Observation("x", "a" * 4_001)
