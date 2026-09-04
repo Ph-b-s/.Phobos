@@ -157,12 +157,16 @@ class AssessmentEngine:
                         raise RuntimeError("assessment observation limit exceeded")
                     batch.append(observation)
 
-                observed_kinds = {item.kind for item in batch}
+                # Procedure requirements are cumulative: a later step may rely
+                # on evidence deliberately captured by an earlier step. This is
+                # essential for workflows such as baseline -> induced response.
+                observed_kinds = {item.kind for item in observations}
+                observed_kinds.update(item.kind for item in batch)
                 missing = set(step.required_observations) - observed_kinds
                 if missing:
                     missing_text = ", ".join(sorted(missing))
                     raise ValueError(
-                        f"step {step.id} did not emit required observations: {missing_text}"
+                        f"step {step.id} did not emit or inherit required observations: {missing_text}"
                     )
 
                 observations.extend(batch)
