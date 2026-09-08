@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable
 
 from models import Asset, Finding
-from security_modules import ModuleContext, ModuleDomain, ModuleStage, module_index
+from security_modules import ModuleContext, ModuleStage, module_index
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,6 +57,34 @@ def default_module_selection(*, include_nmap: bool = False) -> ScanPlan:
     if include_nmap:
         selected.append(ModuleSelection("web.nmap", "supplemental web-facing service vulnerability check"))
     return ScanPlan(tuple(selected), source="default")
+
+
+def merge_module_selections(
+    base: ScanPlan,
+    additions: Iterable[ModuleSelection],
+    *,
+    source: str | None = None,
+) -> ScanPlan:
+    """Merge module selections while keeping supplemental modules last.
+
+    The AI/CLI can add modules without accidentally placing a supplemental tool
+    such as Nmap before the core Web/AI assessment.
+    """
+    catalog = module_index()
+    combined = list(base.selections)
+    seen = {item.module_id for item in combined}
+    for selection in additions:
+        if selection.module_id not in seen:
+            combined.append(selection)
+            seen.add(selection.module_id)
+
+    stage_order = {
+        ModuleStage.WEB_AI: 0,
+        ModuleStage.FOLLOW_UP: 1,
+        ModuleStage.SUPPLEMENTAL: 2,
+    }
+    combined.sort(key=lambda item: stage_order[catalog[item.module_id].stage])
+    return ScanPlan(tuple(combined), source=source or base.source)
 
 
 def validate_plan(plan: ScanPlan) -> ScanPlan:
@@ -119,9 +147,9 @@ def execute_plan(
 
     for selection in plan.selections:
         spec = catalog[selection.module_id]
-        if runner_map.get(selection.module_id) is None:
+        runner = runner_map.get(selection.module_id)
+        if runner is None:
             continue
-        runner = runner_map[selection.module_id]
         try:
             result = tuple(runner(context))
             findings.extend(item for item in result if isinstance(item, Finding))
