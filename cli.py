@@ -11,6 +11,7 @@ from ai import AIConfig, AIError, VeniceClient
 from browser_adapter import BrowserAdapterError, BrowserLimits, PlaywrightBrowserSession
 from config import DEFAULT_USER_AGENT, PHOBOS_VERSION, ScanConfig
 from crawler import ReconCrawler
+from cross_layer import AttackPath, correlate_attack_paths
 from evidence import EvidenceStore
 from graph import Graph
 from models import Asset, AssetType
@@ -128,6 +129,18 @@ def _build_plan(args: argparse.Namespace, context: str) -> ScanPlan:
     return validate_plan(merge_module_selections(plan, additions, source=plan.source))
 
 
+def _attack_path_dict(path: AttackPath) -> dict:
+    return {
+        "id": path.id,
+        "nodes": list(path.nodes),
+        "relationships": list(path.relationships),
+        "pattern": path.pattern,
+        "confidence": path.confidence,
+        "rationale": path.rationale,
+        "metadata": path.metadata,
+    }
+
+
 def run_scan(args: argparse.Namespace) -> int:
     config = ScanConfig.from_cli(_target_url(args.target), tuple(args.scopes or ()), args.output, timeout=args.timeout, max_pages=args.max_pages, max_discovered_urls=args.max_discovered_urls, user_agent=args.user_agent, allow_private_targets=args.allow_private_targets)
     scope = ScopeValidator(config.normalized_scopes, allow_private_targets=config.allow_private_targets)
@@ -151,16 +164,18 @@ def run_scan(args: argparse.Namespace) -> int:
                 browser_name=args.browser_name,
                 user_agent=config.user_agent,
             )
-        recon = ReconCrawler(
-            manager,
-            max_pages=config.max_pages,
-            max_discovered_urls=config.max_discovered_urls,
-            browser=browser,
-        ).crawl(config.target, graph=graph)
+        recon = ReconCrawler(manager, max_pages=config.max_pages, max_discovered_urls=config.max_discovered_urls, browser=browser).crawl(config.target, graph=graph)
         for page in recon.pages:
             graph.add_edge(source=website.id, target=page.id, relationship="hosts")
+        attack_paths = correlate_attack_paths(graph)
         assets = (website, *recon.assets)
-        context = json.dumps({"target": config.target, "assets": [asset.to_dict() for asset in assets[:500]]}, ensure_ascii=False)
+        context_payload = {
+            "target": config.target,
+            "assets": [asset.to_dict() for asset in assets[:500]],
+            "cross_layer_attack_paths": [_attack_path_dict(path) for path in attack_paths[:100]],
+            "browser_enabled": args.browser,
+        }
+        context = json.dumps(context_payload, ensure_ascii=False)
         plan = _build_plan(args, context)
     except (RequestError, AIError, BrowserAdapterError, ValueError) as exc:
         store.write_json("scan.json", {"schema_version": "1.0", "target": config.target, "status": "failed", "error": str(exc)})
@@ -184,6 +199,7 @@ def run_scan(args: argparse.Namespace) -> int:
             "javascript_files": len(recon.javascript),
             "ai_surfaces": len(recon.ai_surfaces),
             "browser_observations": len(recon.browser_observations),
+            "cross_layer_paths": len(attack_paths),
             "errors": len(recon.errors),
         },
         "plan": {
@@ -193,6 +209,7 @@ def run_scan(args: argparse.Namespace) -> int:
     })
     store.write_json("assets.json", [asset.to_dict() for asset in assets])
     store.write_json("graph.json", graph.to_dict())
+    store.write_json("cross_layer_paths.json", [_attack_path_dict(path) for path in attack_paths])
     store.write_json("browser_observations.json", [
         {
             "kind": getattr(item, "kind", ""),
@@ -211,6 +228,7 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"✓ {len(recon.ai_surfaces)} AI signals discovered")
     if args.browser:
         print(f"✓ {len(recon.browser_observations)} browser observations captured")
+    print(f"✓ {len(attack_paths)} cross-layer attack-path candidates correlated")
     print("\nPlanned security coverage:")
     for item in plan.selections:
         print(f"  • {item.module_id} — {item.reason}")
