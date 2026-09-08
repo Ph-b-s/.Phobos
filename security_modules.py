@@ -1,12 +1,8 @@
 """Security-module contracts and the Phobos vulnerability catalog.
 
 Phobos keeps the repository physically flat while using explicit module domains
-and stages to keep responsibilities separate:
-
-* ``web`` modules test the web target, including browser/JavaScript behavior and Nmap.
-* ``ai`` modules test the AI target and its model/agent behavior.
-* ``cross_layer`` modules correlate vulnerabilities and trust/data/control flow
-  between Web and AI rather than acting as a second scanner.
+and stages to keep responsibilities separate. All modules share a KnowledgeStore
+for normalized observations, facts, and findings.
 """
 from __future__ import annotations
 
@@ -14,20 +10,17 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from knowledge_store import KnowledgeStore
 from models import Asset, Finding
 
 
 class ModuleDomain(StrEnum):
-    """What part of the target a module is testing."""
-
     WEB = "web"
     AI = "ai"
     CROSS_LAYER = "cross_layer"
 
 
 class ModuleStage(StrEnum):
-    """Execution stage used to keep module ordering explicit."""
-
     WEB_AI = "web_ai"
     FOLLOW_UP = "follow_up"
     SUPPLEMENTAL = "supplemental"
@@ -35,16 +28,20 @@ class ModuleStage(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ModuleContext:
-    """Shared read-only context supplied to security modules."""
+    """Shared context supplied to a module during one scan."""
 
     target: str
     assets: tuple[Asset, ...] = ()
+    knowledge: KnowledgeStore | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def store(self) -> KnowledgeStore:
+        if self.knowledge is None:
+            raise RuntimeError("module context has no shared knowledge store")
+        return self.knowledge
 
 
 class SecurityModule(Protocol):
-    """Minimal interface implemented by every executable Phobos module."""
-
     id: str
     name: str
     description: str
@@ -55,8 +52,6 @@ class SecurityModule(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ModuleSpec:
-    """Stable metadata describing a vulnerability-testing capability."""
-
     id: str
     name: str
     description: str
@@ -68,14 +63,11 @@ class ModuleSpec:
 
     @property
     def category(self) -> str:
-        """Compatibility alias for older CLI/output consumers."""
         return self.domain.value
 
 
 @dataclass(frozen=True, slots=True)
 class PassiveSecurityModule:
-    """Adapter for a deterministic module runner."""
-
     id: str
     name: str
     description: str
@@ -86,15 +78,11 @@ class PassiveSecurityModule:
         return True
 
     def run(self, context: ModuleContext) -> tuple[Finding, ...]:
-        findings = self.runner(context)
-        return tuple(findings)
+        return tuple(self.runner(context))
 
 
-# Source of truth for the vulnerability toolbox. Catalog entries describe the
-# intended capability map; implemented=False remains until deterministic
-# execution exists.
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
-    # -------------------------------- Web ---------------------------------
+    # Web
     ModuleSpec("web.headers", "Security headers", "Check response security headers and policy gaps.", ModuleDomain.WEB),
     ModuleSpec("web.cookies", "Cookie security", "Check Secure, HttpOnly, SameSite, scope, and session-cookie behavior.", ModuleDomain.WEB),
     ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB),
@@ -128,8 +116,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.client_javascript", "Client-side JavaScript", "Inspect and test browser-side JavaScript routes, sinks, and application behavior.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.api", "API security", "Test discovered HTTP APIs, including authorization, input validation, and state transitions.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.nmap", "Nmap security module", "Optional Nmap-backed service and web-facing vulnerability checks after web/AI testing.", ModuleDomain.WEB, stage=ModuleStage.SUPPLEMENTAL, active=True, tool="nmap"),
-
-    # -------------------------------- AI ---------------------------------
+    # AI
     ModuleSpec("ai.prompt_injection", "Prompt injection", "Test direct prompt-injection paths into model instructions.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.indirect_prompt_injection", "Indirect prompt injection", "Test untrusted external content that can influence model instructions.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.system_prompt", "System prompt leakage", "Test whether protected system instructions can be extracted or manipulated.", ModuleDomain.AI, active=True),
@@ -144,8 +131,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("ai.multi_agent", "Multi-agent security", "Test trust and authorization boundaries between cooperating agents.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.goal_hijacking", "Goal hijacking", "Test whether untrusted inputs can redirect an agent's intended objective.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.context_manipulation", "Context manipulation", "Test memory and contextual state for attacker-controlled influence.", ModuleDomain.AI, active=True),
-
-    # ---------------------------- Cross-layer -----------------------------
+    # Cross-layer
     ModuleSpec("cross_layer.web_to_ai", "Web to AI flow", "Correlate attacker-controlled Web inputs with downstream AI context or decisions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
     ModuleSpec("cross_layer.ai_to_web", "AI to Web flow", "Correlate AI output or decisions with downstream Web/backend sinks.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
     ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether user authorization is preserved when AI functionality performs actions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
@@ -157,15 +143,12 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
 
 
 def module_specs() -> tuple[ModuleSpec, ...]:
-    """Return the immutable vulnerability-module catalog."""
     return MODULE_CATALOG
 
 
 def module_index() -> dict[str, ModuleSpec]:
-    """Return module definitions indexed by stable module ID."""
     return {item.id: item for item in MODULE_CATALOG}
 
 
 def executable_module_ids() -> frozenset[str]:
-    """Return modules that have an implementation registered today."""
     return frozenset()
