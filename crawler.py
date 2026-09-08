@@ -1,4 +1,4 @@
-"""Scoped, bounded HTML reconnaissance crawler with passive AI-surface discovery."""
+"""Scoped, bounded HTML reconnaissance crawler with optional dynamic browser discovery."""
 from __future__ import annotations
 
 from collections import deque
@@ -7,6 +7,7 @@ from html.parser import HTMLParser
 from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from ai_surface import detect_ai_surfaces
+from browser_adapter import BrowserAdapterError, BrowserSession
 from graph import Graph
 from models import Asset, AssetType, EndpointAsset, FormAsset, InputAsset
 from request_manager import RequestError, RequestManager
@@ -81,6 +82,7 @@ class ReconResult:
     inputs: tuple[InputAsset, ...]
     javascript: tuple[Asset, ...]
     ai_surfaces: tuple[Asset, ...]
+    browser_observations: tuple[object, ...]
     errors: tuple[str, ...]
 
     @property
@@ -102,6 +104,7 @@ class ReconCrawler:
         *,
         max_pages: int = 100,
         max_discovered_urls: int = 5000,
+        browser: BrowserSession | None = None,
     ):
         if max_pages < 1:
             raise ValueError("max_pages must be at least 1")
@@ -110,6 +113,7 @@ class ReconCrawler:
         self.request_manager = request_manager
         self.max_pages = max_pages
         self.max_discovered_urls = max_discovered_urls
+        self.browser = browser
 
     def crawl(self, target: str, *, graph: Graph | None = None) -> ReconResult:
         start = normalize_url(target, target) or target
@@ -130,6 +134,7 @@ class ReconCrawler:
         inputs: list[InputAsset] = []
         js: list[Asset] = []
         ai_surfaces: list[Asset] = []
+        browser_observations: list[object] = []
         errors: list[str] = []
         queue_limit_reported = False
 
@@ -199,172 +204,209 @@ class ReconCrawler:
                     )
                     graph.add_edge(source=endpoint.id, target=input_asset.id, relationship="accepts")
 
-        while queue and len(visited) < self.max_pages:
-            url = queue.popleft()
-            if url in visited or not self.request_manager.scope.is_in_scope(url):
-                continue
-            visited.add(url)
-            try:
-                response = self.request_manager.get(url)
-            except RequestError as exc:
-                errors.append(f"{url}: {exc}")
-                continue
-
-            content_type = response.headers.get("content-type", "").lower()
-            if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
-                continue
-
-            counters["page"] += 1
-            page = Asset(
-                f"page_{counters['page']:04d}",
-                AssetType.PAGE,
-                response.url,
-                response.url,
-                1.0,
-                {"status_code": response.status, "content_type": content_type},
-            )
-            pages.append(page)
-            if graph is not None:
-                graph.add_node(id=page.id, type=page.type.value, label=page.name, attributes=page.metadata)
-
-            parser = _Parser(response.url)
-            try:
-                parser.feed(response.text)
-                parser.close()
-            except Exception as exc:
-                errors.append(f"{response.url}: parser error: {exc}")
-                continue
-
-            for link in sorted(parser.result.links):
-                if not self.request_manager.scope.is_in_scope(link):
+        try:
+            while queue and len(visited) < self.max_pages:
+                url = queue.popleft()
+                if url in visited or not self.request_manager.scope.is_in_scope(url):
                     continue
-                if link not in visited and link not in discovered:
-                    if len(discovered) >= self.max_discovered_urls:
-                        if not queue_limit_reported:
-                            errors.append("discovery queue limit reached; additional URLs were ignored")
-                            queue_limit_reported = True
-                    else:
-                        queue.append(link)
-                        discovered.add(link)
-                add_endpoint(
-                    page=page,
-                    url=link,
-                    method="GET",
-                    confidence=0.95,
-                    metadata={"discovery": "html_link"},
-                    relationship="links_to",
-                )
-
-            for candidate in discover_api_endpoints(response.url, response.text):
-                add_endpoint(
-                    page=page,
-                    url=candidate.url,
-                    method=candidate.method,
-                    confidence=candidate.confidence,
-                    metadata={
-                        "discovery": "embedded_api_reference",
-                        "evidence": list(candidate.evidence),
-                    },
-                    relationship="references_api",
-                )
-
-            for script in sorted(parser.result.scripts):
-                if not self.request_manager.scope.is_in_scope(script) or script in seen_js:
+                visited.add(url)
+                try:
+                    response = self.request_manager.get(url)
+                except RequestError as exc:
+                    errors.append(f"{url}: {exc}")
                     continue
-                seen_js.add(script)
-                counters["javascript"] += 1
-                asset = Asset(
-                    f"javascript_{counters['javascript']:04d}",
-                    AssetType.JAVASCRIPT,
-                    script,
-                    script,
-                    0.98,
-                    {"source_page": response.url},
-                )
-                js.append(asset)
-                if graph is not None:
-                    graph.add_node(
-                        id=asset.id,
-                        type=asset.type.value,
-                        label=asset.name,
-                        attributes=asset.metadata,
-                    )
-                    graph.add_edge(source=page.id, target=asset.id, relationship="loads")
 
-            for index, form_data in enumerate(parser.result.forms, 1):
-                if not self.request_manager.scope.is_in_scope(form_data["action"]):
+                content_type = response.headers.get("content-type", "").lower()
+                if "text/html" not in content_type and "application/xhtml+xml" not in content_type:
                     continue
-                counters["form"] += 1
-                named = tuple(item["name"] for item in form_data["inputs"] if item["name"])
-                form = FormAsset(
-                    f"form_{counters['form']:04d}",
-                    AssetType.FORM,
-                    f"{response.url}#{index}",
-                    form_data["action"],
+
+                counters["page"] += 1
+                page = Asset(
+                    f"page_{counters['page']:04d}",
+                    AssetType.PAGE,
+                    response.url,
+                    response.url,
                     1.0,
-                    {"source_page": response.url},
-                    form_data["method"],
-                    named,
+                    {"status_code": response.status, "content_type": content_type},
                 )
-                forms.append(form)
+                pages.append(page)
                 if graph is not None:
-                    graph.add_node(id=form.id, type=form.type.value, label=form.name, attributes=form.metadata)
-                    graph.add_edge(source=page.id, target=form.id, relationship="contains")
-                for item in form_data["inputs"]:
-                    if not item["name"]:
+                    graph.add_node(id=page.id, type=page.type.value, label=page.name, attributes=page.metadata)
+
+                parser = _Parser(response.url)
+                try:
+                    parser.feed(response.text)
+                    parser.close()
+                except Exception as exc:
+                    errors.append(f"{response.url}: parser error: {exc}")
+                    continue
+
+                # Static DOM discovery.
+                discovered_links = set(parser.result.links)
+                discovered_scripts = set(parser.result.scripts)
+                discovered_forms = list(parser.result.forms)
+
+                # Dynamic DOM discovery: execute the application in a real browser,
+                # then merge rendered links/forms/scripts and runtime network signals
+                # into the same normalized attack-surface model.
+                if self.browser is not None:
+                    try:
+                        rendered_url = self.browser.goto(response.url)
+                        snapshot = self.browser.snapshot()
+                        browser_observations.extend(snapshot.to_observations())
+                        browser_observations.extend(self.browser.network_observations())
+                        discovered_links.update(snapshot.links)
+                        discovered_scripts.update(snapshot.scripts)
+                        if snapshot.forms:
+                            discovered_forms.extend(snapshot.forms)
+                        if rendered_url != response.url:
+                            discovered_links.add(rendered_url)
+                    except BrowserAdapterError as exc:
+                        errors.append(f"{response.url}: browser error: {exc}")
+
+                for link in sorted(discovered_links):
+                    if not self.request_manager.scope.is_in_scope(link):
                         continue
-                    counters["input"] += 1
-                    input_asset = InputAsset(
-                        f"input_{counters['input']:04d}",
-                        AssetType.INPUT,
-                        item["name"],
-                        form_data["action"],
-                        1.0,
-                        {"source_form": form.id, "source_page": response.url},
-                        item["type"] or "text",
-                        "form",
-                        form_data["method"],
+                    normalized_link = normalize_url(response.url, link)
+                    if not normalized_link:
+                        continue
+                    if normalized_link not in visited and normalized_link not in discovered:
+                        if len(discovered) >= self.max_discovered_urls:
+                            if not queue_limit_reported:
+                                errors.append("discovery queue limit reached; additional URLs were ignored")
+                                queue_limit_reported = True
+                        else:
+                            queue.append(normalized_link)
+                            discovered.add(normalized_link)
+                    relationship = "dynamic_link" if link not in parser.result.links else "links_to"
+                    add_endpoint(
+                        page=page,
+                        url=normalized_link,
+                        method="GET",
+                        confidence=0.92 if relationship == "dynamic_link" else 0.95,
+                        metadata={"discovery": "browser_dom" if relationship == "dynamic_link" else "html_link"},
+                        relationship=relationship,
                     )
-                    inputs.append(input_asset)
+
+                for candidate in discover_api_endpoints(response.url, response.text):
+                    add_endpoint(
+                        page=page,
+                        url=candidate.url,
+                        method=candidate.method,
+                        confidence=candidate.confidence,
+                        metadata={
+                            "discovery": "embedded_api_reference",
+                            "evidence": list(candidate.evidence),
+                        },
+                        relationship="references_api",
+                    )
+
+                for script in sorted(discovered_scripts):
+                    if not self.request_manager.scope.is_in_scope(script) or script in seen_js:
+                        continue
+                    seen_js.add(script)
+                    counters["javascript"] += 1
+                    asset = Asset(
+                        f"javascript_{counters['javascript']:04d}",
+                        AssetType.JAVASCRIPT,
+                        script,
+                        script,
+                        0.98 if script in parser.result.scripts else 0.90,
+                        {"source_page": response.url, "discovery": "dynamic_dom" if script not in parser.result.scripts else "html_script"},
+                    )
+                    js.append(asset)
                     if graph is not None:
                         graph.add_node(
-                            id=input_asset.id,
-                            type=input_asset.type.value,
-                            label=input_asset.name,
-                            attributes=input_asset.metadata,
+                            id=asset.id,
+                            type=asset.type.value,
+                            label=asset.name,
+                            attributes=asset.metadata,
                         )
-                        graph.add_edge(source=form.id, target=input_asset.id, relationship="accepts")
+                        graph.add_edge(source=page.id, target=asset.id, relationship="loads")
 
-            for candidate in detect_ai_surfaces(
-                response.url,
-                response.text,
-                links=parser.result.links,
-                scripts=parser.result.scripts,
-                forms=parser.result.forms,
-            ):
-                if not self.request_manager.scope.is_in_scope(candidate.url):
-                    continue
-                if candidate.key() in seen_ai:
-                    continue
-                seen_ai.add(candidate.key())
-                counters["ai_surface"] += 1
-                asset = Asset(
-                    f"ai_surface_{counters['ai_surface']:04d}",
-                    AssetType.AI_AGENT,
-                    candidate.kind,
-                    candidate.url,
-                    candidate.confidence,
-                    {"source_page": response.url, "evidence": list(candidate.evidence)},
-                )
-                ai_surfaces.append(asset)
-                if graph is not None:
-                    graph.add_node(
-                        id=asset.id,
-                        type=asset.type.value,
-                        label=asset.name,
-                        attributes=asset.metadata,
+                for index, form_data in enumerate(discovered_forms, 1):
+                    action = normalize_url(response.url, str(form_data.get("action") or response.url))
+                    if not action or not self.request_manager.scope.is_in_scope(action):
+                        continue
+                    counters["form"] += 1
+                    raw_inputs = form_data.get("inputs", ())
+                    named = tuple(
+                        str(item.get("name", "")) for item in raw_inputs
+                        if isinstance(item, dict) and item.get("name")
                     )
-                    graph.add_edge(source=page.id, target=asset.id, relationship="signals")
+                    form = FormAsset(
+                        f"form_{counters['form']:04d}",
+                        AssetType.FORM,
+                        f"{response.url}#{index}",
+                        action,
+                        1.0,
+                        {"source_page": response.url, "discovery": "browser_dom" if form_data not in parser.result.forms else "html"},
+                        str(form_data.get("method") or "GET").upper(),
+                        named,
+                    )
+                    forms.append(form)
+                    if graph is not None:
+                        graph.add_node(id=form.id, type=form.type.value, label=form.name, attributes=form.metadata)
+                        graph.add_edge(source=page.id, target=form.id, relationship="contains")
+                    for item in raw_inputs:
+                        if not isinstance(item, dict) or not item.get("name"):
+                            continue
+                        counters["input"] += 1
+                        input_asset = InputAsset(
+                            f"input_{counters['input']:04d}",
+                            AssetType.INPUT,
+                            str(item["name"]),
+                            action,
+                            1.0,
+                            {"source_form": form.id, "source_page": response.url},
+                            str(item.get("type") or "text"),
+                            "form",
+                            form.method,
+                        )
+                        inputs.append(input_asset)
+                        if graph is not None:
+                            graph.add_node(
+                                id=input_asset.id,
+                                type=input_asset.type.value,
+                                label=input_asset.name,
+                                attributes=input_asset.metadata,
+                            )
+                            graph.add_edge(source=form.id, target=input_asset.id, relationship="accepts")
+
+                for candidate in detect_ai_surfaces(
+                    response.url,
+                    snapshot.text if self.browser is not None and 'snapshot' in locals() else response.text,
+                    links=discovered_links,
+                    scripts=discovered_scripts,
+                    forms=discovered_forms,
+                ):
+                    if not self.request_manager.scope.is_in_scope(candidate.url):
+                        continue
+                    if candidate.key() in seen_ai:
+                        continue
+                    seen_ai.add(candidate.key())
+                    counters["ai_surface"] += 1
+                    asset = Asset(
+                        f"ai_surface_{counters['ai_surface']:04d}",
+                        AssetType.AI_AGENT,
+                        candidate.kind,
+                        candidate.url,
+                        candidate.confidence,
+                        {"source_page": response.url, "evidence": list(candidate.evidence)},
+                    )
+                    ai_surfaces.append(asset)
+                    if graph is not None:
+                        graph.add_node(
+                            id=asset.id,
+                            type=asset.type.value,
+                            label=asset.name,
+                            attributes=asset.metadata,
+                        )
+                        graph.add_edge(source=page.id, target=asset.id, relationship="signals")
+        finally:
+            # The crawler does not own browser lifecycle; the caller can reuse or
+            # close the isolated browser session after the crawl completes.
+            pass
 
         return ReconResult(
             tuple(pages),
@@ -373,5 +415,6 @@ class ReconCrawler:
             tuple(inputs),
             tuple(js),
             tuple(ai_surfaces),
+            tuple(browser_observations),
             tuple(errors),
         )
