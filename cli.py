@@ -8,6 +8,7 @@ import sys
 from urllib.parse import urlparse
 
 from ai import AIConfig, AIError, VeniceClient
+from browser_adapter import BrowserAdapterError, BrowserLimits, PlaywrightBrowserSession
 from config import DEFAULT_USER_AGENT, PHOBOS_VERSION, ScanConfig
 from crawler import ReconCrawler
 from evidence import EvidenceStore
@@ -36,6 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-discovered-urls", type=int, default=5_000)
     scan.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     scan.add_argument("--allow-private-targets", action="store_true")
+    scan.add_argument("--browser", action="store_true", help="enable Playwright for JavaScript execution and dynamic Web reconnaissance")
+    scan.add_argument("--browser-name", choices=("chromium", "firefox", "webkit"), default="chromium")
+    scan.add_argument("--browser-max-requests", type=int, default=2_000)
     scan.add_argument("--nmap", action="store_true", help="enable the optional Nmap web-security module after the main assessment")
     scan.add_argument("--module", action="append", dest="modules", metavar="MODULE_ID", help="add a security module (repeatable)")
     scan.add_argument("--no-default-modules", action="store_true", help="disable the default baseline module plan")
@@ -132,23 +136,40 @@ def run_scan(args: argparse.Namespace) -> int:
     graph = Graph()
     website = Asset("website_001", AssetType.WEBSITE, config.target, config.target, metadata={"scopes": list(scope.allowed_domains)})
     graph.add_node(id=website.id, type=website.type.value, label=website.name, attributes=website.metadata)
+    browser: PlaywrightBrowserSession | None = None
 
     print("[PHOBOS] Starting scan")
     print(f"  Target: {config.target}")
     print(f"  Scope:  {', '.join(scope.allowed_domains)}")
+    print(f"  Web runtime: {'browser/JavaScript' if args.browser else 'static HTTP'}")
 
     try:
-        recon = ReconCrawler(manager, max_pages=config.max_pages, max_discovered_urls=config.max_discovered_urls).crawl(config.target, graph=graph)
+        if args.browser:
+            browser = PlaywrightBrowserSession(
+                scope,
+                limits=BrowserLimits(max_requests=args.browser_max_requests, navigation_timeout_ms=int(config.timeout * 1000)),
+                browser_name=args.browser_name,
+                user_agent=config.user_agent,
+            )
+        recon = ReconCrawler(
+            manager,
+            max_pages=config.max_pages,
+            max_discovered_urls=config.max_discovered_urls,
+            browser=browser,
+        ).crawl(config.target, graph=graph)
         for page in recon.pages:
             graph.add_edge(source=website.id, target=page.id, relationship="hosts")
         assets = (website, *recon.assets)
         context = json.dumps({"target": config.target, "assets": [asset.to_dict() for asset in assets[:500]]}, ensure_ascii=False)
         plan = _build_plan(args, context)
-    except (RequestError, AIError, ValueError) as exc:
+    except (RequestError, AIError, BrowserAdapterError, ValueError) as exc:
         store.write_json("scan.json", {"schema_version": "1.0", "target": config.target, "status": "failed", "error": str(exc)})
         store.write_json("graph.json", graph.to_dict())
         print(f"✗ Scan stopped: {exc}", file=sys.stderr)
         return 2
+    finally:
+        if browser is not None:
+            browser.close()
 
     store.write_json("scan.json", {
         "schema_version": "1.0",
@@ -162,6 +183,7 @@ def run_scan(args: argparse.Namespace) -> int:
             "endpoints": len(recon.endpoints),
             "javascript_files": len(recon.javascript),
             "ai_surfaces": len(recon.ai_surfaces),
+            "browser_observations": len(recon.browser_observations),
             "errors": len(recon.errors),
         },
         "plan": {
@@ -171,13 +193,25 @@ def run_scan(args: argparse.Namespace) -> int:
     })
     store.write_json("assets.json", [asset.to_dict() for asset in assets])
     store.write_json("graph.json", graph.to_dict())
+    store.write_json("browser_observations.json", [
+        {
+            "kind": getattr(item, "kind", ""),
+            "description": getattr(item, "description", ""),
+            "source": getattr(item, "source", ""),
+            "metadata": getattr(item, "metadata", {}),
+        }
+        for item in recon.browser_observations
+    ])
     store.write_json("findings.json", [])
 
     print(f"✓ {len(recon.pages)} pages discovered")
     print(f"✓ {len(recon.endpoints)} endpoints discovered")
     print(f"✓ {len(recon.inputs)} inputs discovered")
+    print(f"✓ {len(recon.javascript)} JavaScript assets discovered")
     print(f"✓ {len(recon.ai_surfaces)} AI signals discovered")
-    print("\nPlanned security coverage (execution layer comes next):")
+    if args.browser:
+        print(f"✓ {len(recon.browser_observations)} browser observations captured")
+    print("\nPlanned security coverage:")
     for item in plan.selections:
         print(f"  • {item.module_id} — {item.reason}")
     print(f"\nResults saved to {config.output_dir}")
