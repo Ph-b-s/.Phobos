@@ -60,6 +60,9 @@ class PassiveSecurityModule:
         return tuple(findings)
 
 
+# The catalog describes the security capabilities Phobos can grow into.
+# "active" means the module is intended to perform security testing rather than
+# only passive discovery; it does not mean an implementation is complete yet.
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.headers", "Security headers", "Inspect response security headers and policy gaps.", "web"),
     ModuleSpec("web.cookies", "Cookie security", "Inspect cookie attributes such as Secure, HttpOnly, and SameSite.", "web"),
@@ -79,7 +82,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("ai.data_disclosure", "AI data disclosure", "Assess model-mediated sensitive information disclosure.", "ai", active=True),
     ModuleSpec("ai.tool_abuse", "AI tool abuse", "Assess model-controlled tool and action boundaries.", "ai", active=True),
     ModuleSpec("ai.excessive_agency", "AI excessive agency", "Assess whether AI functionality can perform unintended privileged actions.", "ai", active=True),
-    ModuleSpec("network.nmap", "Nmap", "Optional host/service discovery for supporting target context.", "network"),
+    ModuleSpec("web.nmap", "Nmap security check", "Optional Nmap-backed service and known-vulnerability checks for the target web host.", "web", active=True),
 )
 
 
