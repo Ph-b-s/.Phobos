@@ -1,66 +1,41 @@
 # Phobos Reconnaissance Architecture
 
-Phobos is being built as a security testing framework, not as a collection of independent scanners. Every discovery mechanism should produce structured information that can be connected to the same target model.
+Phobos is a web and AI security testing framework. Reconnaissance should build one useful target model; individual discovery techniques are modules that feed it.
 
 ## 1. Target and scope
 
-The user supplies an authorized target and an explicit scope policy.
+The user supplies an authorized target and explicit scope. All discovery modules operate inside that boundary.
 
 ```text
-Target URL / host
-        |
-        v
-   Scope Validator
-        |
-   +----+----+
-   |         |
- allowed   rejected
+Target
+  ↓
+Scope Validator
+  ↓
+Discovery modules
 ```
 
-Nothing below this layer should invent a new target or bypass the scope boundary.
+Nothing below this layer may invent a new target or bypass scope enforcement.
 
-## 2. Network discovery
+## 2. Discovery modules
 
-Nmap is a useful part of the foundation. It answers a different question from the web crawler:
-
-> What network services are exposed by this host?
-
-The current Nmap primitive performs bounded TCP discovery of the top 100 ports and returns normalized open-port observations. It does not run through a shell and does not accept arbitrary port expressions from higher-level automation.
-
-The intended role is:
+The core focus is web and AI security. Nmap is an **optional reconnaissance module**, not a separate scanning subsystem.
 
 ```text
-Host
- |
- +--> Nmap
-       |
-       +--> open port
-       +--> protocol
-       +--> service hint
-       +--> product/version hint
+                 Reconnaissance
+                       │
+          ┌────────────┼────────────┐
+          ▼            ▼            ▼
+        Web           AI          Nmap
+     discovery     discovery     module
+          │            │            │
+          └────────────┴────────────┘
+                       ▼
+                 Attack Graph
 ```
 
-Nmap findings should enrich the attack-surface graph rather than become an isolated report.
+### Web discovery
 
-For example:
-
-```text
-website: lab.example
-        |
-        +-- exposes --> tcp/443
-        |               |
-        |               +-- service --> https
-        |
-        +-- exposes --> tcp/22
-                        |
-                        +-- service --> ssh
-```
-
-An open port is not itself a vulnerability. It is an observation used to decide what should be inspected next.
-
-## 3. Web discovery
-
-The crawler works from HTTP(S) targets and discovers:
+The crawler discovers:
 
 ```text
 pages
@@ -70,157 +45,130 @@ inputs
 JavaScript
 API routes
 query parameters
-AI-related signals
 ```
 
-JavaScript route discovery is passive. The purpose is to reveal application functionality that is not represented by ordinary HTML links.
+### AI-surface discovery
 
-## 4. Service-to-application correlation
-
-This is the important next design step.
-
-Network discovery and web discovery should converge into one graph:
+AI discovery adds passive signals for likely:
 
 ```text
-                 +----------------+
-                 | Target Website |
-                 +-------+--------+
-                         |
-                 +-------+-------+
-                 |               |
-              Network           Web
-             discovery       discovery
-                 |               |
-              ports         pages/endpoints
-                 |               |
-                 +-------+-------+
-                         |
-                    Attack Graph
+AI endpoints
+providers
+agent/tool interfaces
+AI-oriented inputs
 ```
 
-Later, the graph should be capable of representing:
+These are indicators, not findings.
+
+### Nmap module
+
+Nmap answers one narrow question:
+
+> Which common TCP services are exposed by the target host?
+
+Its output is normalized into simple `port` assets so it can appear in the same graph as web assets.
+
+The intended relationship is deliberately small:
 
 ```text
-host
-  -> port
-  -> service
-  -> HTTP endpoint
-  -> authentication boundary
-  -> application input
-  -> AI surface
-  -> AI agent
-  -> tool/API
-  -> resource
+Target host
+    │
+    └── exposes ──> tcp/443
+                       │
+                       └── service: https
 ```
 
-## 5. Assessment procedures
+Nmap does **not** control the crawler, choose vulnerabilities, or become a second orchestration layer. Its results simply provide additional context for later testing.
 
-A procedure is a reusable investigation, not a payload.
+## 3. Unified attack-surface model
 
-A procedure should define:
+All discovery modules feed the same graph:
 
 ```text
-Prerequisites
-Discovery requirements
-Required observations
-Safe probe
-Expected evidence
-Positive confirmation
-Impact validation
+Target
+  │
+  ├── exposes ──> Port
+  │
+  └── hosts ────> Web application
+                    │
+                    ├── contains ──> Page
+                    ├── contains ──> Form
+                    ├── links ─────> Endpoint
+                    ├── loads ─────> JavaScript
+                    └── signals ───> AI surface
 ```
 
-For the first PortSwigger AI-security work, procedures should be derived from the vulnerability class and then exercised against the lab target. Lab-specific URLs, strings, and ordering should live in test fixtures, not in the procedure itself.
+The graph is deliberately richer than a flat list but remains simple enough to support the first real PortSwigger tests.
 
-## 6. Execution adapters
+## 4. Testing layer
 
-The procedure should never directly know how to drive a browser or construct low-level network traffic.
-
-Instead:
+After discovery, Phobos selects a vulnerability-specific procedure.
 
 ```text
-Procedure
-   |
-   v
+Attack Graph
+     ↓
+Applicable procedure
+     ↓
 Assessment Engine
-   |
-   v
-Execution Adapter
-   |
-   +--> HTTP
-   +--> Browser
-   +--> future structured tool observation
+     ↓
+HTTP / Browser adapter
+     ↓
+Observations
+     ↓
+Evidence correlation
+     ↓
+Finding
 ```
 
-This lets the same security procedure be reused across different targets and execution mechanisms.
+A procedure describes an investigation and confirmation logic. It should not contain lab-specific URLs or depend on Nmap being present unless the vulnerability actually requires that information.
 
-## 7. Evidence and correlation
+## 5. First real target workflow
 
-Observations are the bridge between execution and findings.
-
-A useful finding should be reconstructable:
-
-```text
-source
-  -> transformation
-  -> model interaction
-  -> observed behavior
-  -> security consequence
-```
-
-For AI vulnerabilities, this is more important than matching a suspicious string. Phobos should prefer reproducible relationships over lexical guesses.
-
-## 8. The first real target workflow
-
-For a PortSwigger lab, the intended progression is:
+For the first PortSwigger lab work, the intended flow is:
 
 ```text
 1. Enter lab target + scope
-2. Discover host/network exposure
-3. Discover web application surface
-4. Build the unified graph
-5. Identify relevant AI surface
-6. Select applicable assessment procedure
-7. Capture a clean baseline
-8. Perform the smallest safe active probe
-9. Compare observations
-10. Confirm only with sufficient evidence
-11. Produce a reproducible finding
+2. Run normal web reconnaissance
+3. Optionally run the Nmap module
+4. Merge discovered assets into the graph
+5. Identify the relevant attack surface
+6. Select one narrow assessment procedure
+7. Execute the smallest useful probe
+8. Capture evidence
+9. Confirm the vulnerability
+10. Produce a reproducible finding
 ```
 
-The first implementation milestone is therefore not "make Phobos autonomous." It is:
+Nmap is therefore a **supporting module** in step 3, not the center of the workflow.
 
-> Given one authorized PortSwigger lab, Phobos should build a useful attack-surface model and execute one narrowly scoped security procedure against it.
+## 6. Long-term boundaries
 
-## 9. Long-term module boundaries
-
-The flat repository can remain physically flat while keeping strong logical boundaries:
+The repository can stay physically flat while keeping these logical responsibilities:
 
 ```text
 Scope / Policy
-      |
-      +--> Network Discovery
-      |
-      +--> Web Discovery
-      |
-      +--> AI Surface Discovery
-      |
-      v
-Attack-Surface Graph
-      |
-      v
-Assessment Procedures
-      |
-      v
-Assessment Engine
-      |
-      v
-Execution Adapters
-      |
-      v
-Observations / Evidence
-      |
-      v
-Finding / Report
+      │
+      ├── Web Discovery
+      ├── AI Surface Discovery
+      └── Nmap Module (optional)
+                  │
+                  ▼
+          Attack-Surface Graph
+                  │
+                  ▼
+         Assessment Procedures
+                  │
+                  ▼
+          Assessment Engine
+                  │
+                  ▼
+       Execution Adapters
+                  │
+                  ▼
+       Observations / Evidence
+                  │
+                  ▼
+             Findings
 ```
 
-That architecture keeps Phobos focused on the actual security question: how an attacker-controlled input can move through a real application and cross a trust boundary.
+The guiding principle is simple: **Nmap enriches Phobos; it does not redefine Phobos.**
