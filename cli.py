@@ -13,9 +13,8 @@ from crawler import ReconCrawler
 from evidence import EvidenceStore
 from graph import Graph
 from models import Asset, AssetType
-from nmap_runner import NmapError, run_top_ports_scan
 from request_manager import RequestError, RequestManager
-from scanner import ModuleSelection, ScanPlan, default_module_selection, validate_plan
+from scanner import ModuleSelection, ScanPlan, default_module_selection, merge_module_selections, validate_plan
 from security_modules import module_index
 from scope import ScopeValidator
 
@@ -37,7 +36,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-discovered-urls", type=int, default=5_000)
     scan.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     scan.add_argument("--allow-private-targets", action="store_true")
-    scan.add_argument("--nmap", action="store_true", help="enable optional Nmap host/service discovery")
+    scan.add_argument("--nmap", action="store_true", help="enable the optional Nmap web-security module after the main assessment")
     scan.add_argument("--module", action="append", dest="modules", metavar="MODULE_ID", help="add a security module (repeatable)")
     scan.add_argument("--no-default-modules", action="store_true", help="disable the default baseline module plan")
     scan.add_argument("--ai", action="store_true", help="use the Phobos AI planner to prioritize additional modules")
@@ -48,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
     agent.add_argument("--allow-private-targets", action="store_true")
 
-    modules = sub.add_parser("modules", help="list available security modules")
+    modules = sub.add_parser("modules", help="list the Phobos vulnerability-module catalog")
     modules.add_argument("--json", action="store_true")
 
     doctor = sub.add_parser("doctor", help="check the local Phobos environment")
@@ -65,16 +64,26 @@ def _target_url(target: str) -> str:
 
 def run_modules(args: argparse.Namespace) -> int:
     rows = [
-        {"id": item.id, "name": item.name, "category": item.category, "active": item.active, "description": item.description}
+        {
+            "id": item.id,
+            "name": item.name,
+            "domain": item.domain.value,
+            "stage": item.stage.value,
+            "active": item.active,
+            "implemented": item.implemented,
+            "tool": item.tool,
+            "description": item.description,
+        }
         for item in module_index().values()
     ]
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
-    print("[PHOBOS] Security modules")
+    print("[PHOBOS] Vulnerability module catalog")
     for row in rows:
-        mode = "active" if row["active"] else "passive/baseline"
-        print(f"- {row['id']}: {row['name']} [{mode}] — {row['description']}")
+        state = "implemented" if row["implemented"] else "planned"
+        tool = f", tool={row['tool']}" if row["tool"] else ""
+        print(f"- {row['id']}: {row['name']} [{row['domain']}/{row['stage']}, {state}{tool}] — {row['description']}")
     return 0
 
 
@@ -104,22 +113,15 @@ def _python_version() -> str:
 
 def _build_plan(args: argparse.Namespace, context: str) -> ScanPlan:
     plan = ScanPlan((), source="cli") if args.no_default_modules else default_module_selection(include_nmap=args.nmap)
-    selections = list(plan.selections)
-    known = {item.module_id for item in selections}
-    for module_id in args.modules or ():
-        if module_id not in known:
-            selections.append(ModuleSelection(module_id, "explicit CLI selection"))
-            known.add(module_id)
+    additions = [ModuleSelection(module_id, "explicit CLI selection") for module_id in (args.modules or ())]
 
     if args.ai:
         decision = VeniceClient(AIConfig.from_env()).plan(context)
         print(f"[PHOBOS AI] {decision['reason']}")
-        for module_id in decision["modules"]:
-            if module_id not in known:
-                selections.append(ModuleSelection(module_id, "selected by Phobos AI"))
-                known.add(module_id)
-        return validate_plan(ScanPlan(tuple(selections), source="ai"))
-    return validate_plan(ScanPlan(tuple(selections), source=plan.source))
+        additions.extend(ModuleSelection(module_id, "selected by Phobos AI") for module_id in decision["modules"])
+        return validate_plan(merge_module_selections(plan, additions, source="ai"))
+
+    return validate_plan(merge_module_selections(plan, additions, source=plan.source))
 
 
 def run_scan(args: argparse.Namespace) -> int:
@@ -135,29 +137,11 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"  Target: {config.target}")
     print(f"  Scope:  {', '.join(scope.allowed_domains)}")
 
-    network_ports: list[Asset] = []
-    nmap_error: str | None = None
-    if args.nmap:
-        try:
-            result = run_top_ports_scan(config.target, scope, timeout=max(30.0, args.timeout * 6))
-            for index, port in enumerate(result.ports, 1):
-                asset = Asset(
-                    f"port_{index:04d}", AssetType.PORT, f"{port.protocol}/{port.port}",
-                    metadata={"protocol": port.protocol, "port": port.port, "state": port.state, "service": port.service, "product": port.product, "version": port.version, "reason": port.reason},
-                )
-                network_ports.append(asset)
-                graph.add_node(id=asset.id, type=asset.type.value, label=asset.name, attributes=asset.metadata)
-                graph.add_edge(source=website.id, target=asset.id, relationship="exposes")
-            print(f"✓ Nmap: {len(network_ports)} open TCP ports discovered")
-        except NmapError as exc:
-            nmap_error = str(exc)
-            print(f"! Nmap unavailable: {exc}")
-
     try:
         recon = ReconCrawler(manager, max_pages=config.max_pages, max_discovered_urls=config.max_discovered_urls).crawl(config.target, graph=graph)
         for page in recon.pages:
             graph.add_edge(source=website.id, target=page.id, relationship="hosts")
-        assets = (website, *network_ports, *recon.assets)
+        assets = (website, *recon.assets)
         context = json.dumps({"target": config.target, "assets": [asset.to_dict() for asset in assets[:500]]}, ensure_ascii=False)
         plan = _build_plan(args, context)
     except (RequestError, AIError, ValueError) as exc:
@@ -167,10 +151,23 @@ def run_scan(args: argparse.Namespace) -> int:
         return 2
 
     store.write_json("scan.json", {
-        "schema_version": "1.0", "target": config.target, "scopes": list(scope.allowed_domains), "status": "recon_complete",
-        "summary": {"pages": len(recon.pages), "forms": len(recon.forms), "inputs": len(recon.inputs), "endpoints": len(recon.endpoints), "javascript_files": len(recon.javascript), "ai_surfaces": len(recon.ai_surfaces), "open_tcp_ports": len(network_ports), "errors": len(recon.errors) + (1 if nmap_error else 0)},
-        "plan": {"source": plan.source, "modules": [item.module_id for item in plan.selections]},
-        "nmap": {"enabled": args.nmap, "error": nmap_error},
+        "schema_version": "1.0",
+        "target": config.target,
+        "scopes": list(scope.allowed_domains),
+        "status": "recon_complete",
+        "summary": {
+            "pages": len(recon.pages),
+            "forms": len(recon.forms),
+            "inputs": len(recon.inputs),
+            "endpoints": len(recon.endpoints),
+            "javascript_files": len(recon.javascript),
+            "ai_surfaces": len(recon.ai_surfaces),
+            "errors": len(recon.errors),
+        },
+        "plan": {
+            "source": plan.source,
+            "modules": [item.module_id for item in plan.selections],
+        },
     })
     store.write_json("assets.json", [asset.to_dict() for asset in assets])
     store.write_json("graph.json", graph.to_dict())
@@ -180,7 +177,7 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"✓ {len(recon.endpoints)} endpoints discovered")
     print(f"✓ {len(recon.inputs)} inputs discovered")
     print(f"✓ {len(recon.ai_surfaces)} AI signals discovered")
-    print("\nPlanned security coverage:")
+    print("\nPlanned security coverage (execution layer comes next):")
     for item in plan.selections:
         print(f"  • {item.module_id} — {item.reason}")
     print(f"\nResults saved to {config.output_dir}")
