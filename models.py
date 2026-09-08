@@ -14,6 +14,7 @@ class AssetType(StrEnum):
     INPUT = "input"
     API = "api"
     JAVASCRIPT = "javascript"
+    PORT = "port"
     AI_AGENT = "ai_agent"
     TOOL = "tool"
     RESOURCE = "resource"
