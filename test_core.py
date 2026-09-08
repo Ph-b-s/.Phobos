@@ -90,11 +90,13 @@ def test_cli_parser():
             "25",
             "--max-discovered-urls",
             "100",
+            "--nmap",
         ]
     )
     assert args.command == "scan"
     assert args.max_pages == 25
     assert args.max_discovered_urls == 100
+    assert args.nmap is True
 
 
 def test_cli_ai_dry_run_parser():
