@@ -1,16 +1,39 @@
-"""Security-module contracts and the initial passive web checks.
+"""Security-module contracts and the Phobos vulnerability catalog.
 
-Phobos is a general web-security scanner for applications that expose AI
-functionality. Individual security capabilities live behind a small common
-module contract so the AI planner can reason about which checks to run without
-owning low-level execution.
+Phobos keeps the repository physically flat while using explicit module domains
+and stages to keep responsibilities separate:
+
+* ``web`` modules test the web target, including the optional Nmap module.
+* ``ai`` modules test the AI target and its model/agent behavior.
+* ``cross_layer`` modules test vulnerabilities that cross the Web <-> AI boundary.
+
+The catalog is deliberately descriptive. A module is only executable when a
+runner is registered by the scanner; catalog entries must never be mistaken for
+implemented attack logic.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import Any, Protocol
 
 from models import Asset, Finding
+
+
+class ModuleDomain(StrEnum):
+    """What part of the target a module is testing."""
+
+    WEB = "web"
+    AI = "ai"
+    CROSS_LAYER = "cross_layer"
+
+
+class ModuleStage(StrEnum):
+    """Execution stage used to keep module ordering explicit."""
+
+    WEB_AI = "web_ai"
+    FOLLOW_UP = "follow_up"
+    SUPPLEMENTAL = "supplemental"
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,7 +46,7 @@ class ModuleContext:
 
 
 class SecurityModule(Protocol):
-    """Minimal interface implemented by every Phobos security module."""
+    """Minimal interface implemented by every executable Phobos module."""
 
     id: str
     name: str
@@ -35,21 +58,31 @@ class SecurityModule(Protocol):
 
 @dataclass(frozen=True, slots=True)
 class ModuleSpec:
+    """Stable metadata describing a vulnerability-testing capability."""
+
     id: str
     name: str
     description: str
-    category: str
+    domain: ModuleDomain
+    stage: ModuleStage = ModuleStage.WEB_AI
     active: bool = False
+    implemented: bool = False
+    tool: str | None = None
+
+    @property
+    def category(self) -> str:
+        """Compatibility alias for older CLI/output consumers."""
+        return self.domain.value
 
 
 @dataclass(frozen=True, slots=True)
 class PassiveSecurityModule:
-    """Small deterministic module used by the scanner without active probing."""
+    """Adapter for a deterministic module runner."""
 
     id: str
     name: str
     description: str
-    category: str
+    domain: ModuleDomain
     runner: Any
 
     def can_run(self, context: ModuleContext) -> bool:
@@ -60,37 +93,79 @@ class PassiveSecurityModule:
         return tuple(findings)
 
 
-# The catalog describes the security capabilities Phobos can grow into.
-# "active" means the module is intended to perform security testing rather than
-# only passive discovery; it does not mean an implementation is complete yet.
+# This is the source of truth for the vulnerability toolbox. Planned modules
+# are catalogued now so the AI can understand Phobos' intended coverage, but
+# ``implemented`` remains false until deterministic execution exists.
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
-    ModuleSpec("web.headers", "Security headers", "Inspect response security headers and policy gaps.", "web"),
-    ModuleSpec("web.cookies", "Cookie security", "Inspect cookie attributes such as Secure, HttpOnly, and SameSite.", "web"),
-    ModuleSpec("web.exposure", "Common exposure checks", "Look for common publicly exposed files and endpoints.", "web"),
-    ModuleSpec("web.methods", "HTTP method review", "Identify unusual or risky HTTP method exposure for discovered endpoints.", "web", active=True),
-    ModuleSpec("web.params", "Parameter analysis", "Prioritize discovered parameters for deeper validation.", "web"),
-    ModuleSpec("web.auth", "Authentication checks", "Assess authentication boundaries and session behavior.", "web", active=True),
-    ModuleSpec("web.access_control", "Access control checks", "Test whether security-sensitive resources cross authorization boundaries.", "web", active=True),
-    ModuleSpec("web.injection", "Injection checks", "Run appropriate input-validation procedures against discovered parameters.", "web", active=True),
-    ModuleSpec("web.xss", "Cross-site scripting", "Assess reflected, stored, and DOM-related XSS surfaces.", "web", active=True),
-    ModuleSpec("web.sqli", "SQL injection", "Assess database-backed parameters for SQL injection conditions.", "web", active=True),
-    ModuleSpec("web.ssrf", "SSRF", "Assess server-side request features and trust-boundary crossings.", "web", active=True),
-    ModuleSpec("web.uploads", "File upload security", "Assess upload handling and unsafe file-processing behavior.", "web", active=True),
-    ModuleSpec("web.config", "Configuration exposure", "Inspect deployment and application configuration weaknesses.", "web"),
-    ModuleSpec("ai.surface", "AI surface mapping", "Identify AI interfaces, providers, agents, and AI-oriented inputs.", "ai"),
-    ModuleSpec("ai.prompt_injection", "Prompt injection", "Assess direct and indirect prompt-injection paths.", "ai", active=True),
-    ModuleSpec("ai.data_disclosure", "AI data disclosure", "Assess model-mediated sensitive information disclosure.", "ai", active=True),
-    ModuleSpec("ai.tool_abuse", "AI tool abuse", "Assess model-controlled tool and action boundaries.", "ai", active=True),
-    ModuleSpec("ai.excessive_agency", "AI excessive agency", "Assess whether AI functionality can perform unintended privileged actions.", "ai", active=True),
-    ModuleSpec("web.nmap", "Nmap security check", "Optional Nmap-backed service and known-vulnerability checks for the target web host.", "web", active=True),
+    # ------------------------------- Web ---------------------------------
+    ModuleSpec("web.headers", "Security headers", "Check response security headers and policy gaps.", ModuleDomain.WEB),
+    ModuleSpec("web.cookies", "Cookie security", "Check Secure, HttpOnly, SameSite, scope, and session-cookie behavior.", ModuleDomain.WEB),
+    ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB),
+    ModuleSpec("web.methods", "HTTP methods", "Test unusual or dangerous HTTP method exposure.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.auth", "Authentication", "Test login, session, reset, MFA, and authentication boundary behavior.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.access_control", "Access control", "Test authorization boundaries, IDOR, privilege escalation, and object access.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.injection", "Generic injection", "Select and coordinate injection procedures for discovered inputs.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.xss", "Cross-site scripting", "Test reflected, stored, and DOM XSS surfaces.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.sqli", "SQL injection", "Test database-backed inputs for SQL injection conditions.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.nosqli", "NoSQL injection", "Test document-database inputs for NoSQL injection conditions.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.ssrf", "Server-side request forgery", "Test server-side request features and trust-boundary crossings.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.csrf", "Cross-site request forgery", "Test state-changing actions for CSRF weaknesses.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.command_injection", "Command injection", "Test input paths that may reach operating-system command execution.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.path_traversal", "Path traversal", "Test file/path parameters for traversal outside intended directories.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.file_upload", "File upload", "Test upload validation, processing, storage, and execution boundaries.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.xxe", "XXE", "Test XML processing for external-entity injection conditions.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.ssti", "Server-side template injection", "Test template expression surfaces for server-side evaluation.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.deserialization", "Deserialization", "Test serialized-object inputs for unsafe deserialization behavior.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.cors", "CORS", "Test cross-origin policy and credential exposure.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.cache", "Web cache attacks", "Test cache poisoning, deception, and keying behavior.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.request_smuggling", "Request smuggling", "Test front-end/back-end HTTP parsing inconsistencies.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.host_header", "Host header attacks", "Test host-header handling and trust assumptions.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.jwt", "JWT security", "Test token parsing, signing, claims, and trust behavior.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.graphql", "GraphQL security", "Test GraphQL authorization, introspection, batching, and injection surfaces.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.websocket", "WebSocket security", "Test WebSocket authentication, authorization, and message handling.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.race_conditions", "Race conditions", "Test concurrent state transitions for timing-sensitive flaws.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.business_logic", "Business logic", "Test workflows for abuse, state confusion, and invariant violations.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.info_disclosure", "Information disclosure", "Check responses and interfaces for unintended sensitive data exposure.", ModuleDomain.WEB),
+    ModuleSpec("web.config", "Configuration security", "Check deployment and application configuration weaknesses.", ModuleDomain.WEB),
+    ModuleSpec("web.nmap", "Nmap security module", "Optional Nmap-backed service and web-facing vulnerability checks after web/AI testing.", ModuleDomain.WEB, stage=ModuleStage.SUPPLEMENTAL, active=True, tool="nmap"),
+
+    # -------------------------------- AI ---------------------------------
+    ModuleSpec("ai.prompt_injection", "Prompt injection", "Test direct prompt-injection paths into model instructions.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.indirect_prompt_injection", "Indirect prompt injection", "Test untrusted external content that can influence model instructions.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.system_prompt", "System prompt leakage", "Test whether protected system instructions can be extracted or manipulated.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.data_disclosure", "AI data disclosure", "Test model-mediated disclosure of secrets or protected application data.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.output_handling", "Unsafe AI output handling", "Test whether model output becomes an unsafe downstream input.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.tool_abuse", "AI tool abuse", "Test model-controlled tools for unauthorized or unsafe actions.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.excessive_agency", "AI excessive agency", "Test whether AI functionality can exercise more authority than intended.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.rag", "RAG security", "Test retrieval, document trust, authorization, and grounding boundaries.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.vector", "Vector/embedding security", "Test embedding and vector-store trust and isolation weaknesses.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.data_poisoning", "AI data poisoning", "Test whether attacker-controlled data can corrupt model context or behavior.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.unbounded_consumption", "Unbounded consumption", "Test model-driven resource and cost exhaustion paths.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.multi_agent", "Multi-agent security", "Test trust and authorization boundaries between cooperating agents.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.goal_hijacking", "Goal hijacking", "Test whether untrusted inputs can redirect an agent's intended objective.", ModuleDomain.AI, active=True),
+    ModuleSpec("ai.context_manipulation", "Context manipulation", "Test memory and contextual state for attacker-controlled influence.", ModuleDomain.AI, active=True),
+
+    # ---------------------------- Cross-layer -----------------------------
+    ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether web authorization boundaries are preserved when AI functionality is involved.", ModuleDomain.CROSS_LAYER, active=True),
+    ModuleSpec("cross_layer.prompt_to_web", "Prompt-to-web escalation", "Test whether model-controlled reasoning can reach unsafe web actions or endpoints.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.tool_to_web", "Tool-to-web escalation", "Test whether AI tools can cross web trust boundaries or invoke unauthorized functionality.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.data_flow", "Web/AI data-flow abuse", "Test sensitive data crossing between web application and AI contexts.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
 )
 
 
 def module_specs() -> tuple[ModuleSpec, ...]:
-    """Return the immutable catalog exposed to the orchestration layer."""
+    """Return the immutable vulnerability-module catalog."""
     return MODULE_CATALOG
 
 
 def module_index() -> dict[str, ModuleSpec]:
     """Return module definitions indexed by stable module ID."""
     return {item.id: item for item in MODULE_CATALOG}
+
+
+def executable_module_ids() -> frozenset[str]:
+    """Return modules that have an implementation registered today."""
+    # Execution registration is intentionally kept in the scanner layer. This
+    # function is the future extension point; the current implementation does
+    # not pretend catalog entries are runnable.
+    return frozenset()
