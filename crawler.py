@@ -10,6 +10,7 @@ from ai_surface import detect_ai_surfaces
 from graph import Graph
 from models import Asset, AssetType, EndpointAsset, FormAsset, InputAsset
 from request_manager import RequestError, RequestManager
+from web_surface import discover_api_endpoints
 
 _SKIP = {"mailto", "tel", "javascript", "data", "blob"}
 
@@ -115,7 +116,7 @@ class ReconCrawler:
         queue = deque([start])
         discovered = {start}
         visited: set[str] = set()
-        seen_endpoints: set[str] = set()
+        seen_endpoints: set[tuple[str, str]] = set()
         seen_js: set[str] = set()
         seen_query_inputs: set[tuple[str, str]] = set()
         seen_ai: set[tuple[str, str]] = set()
@@ -131,6 +132,72 @@ class ReconCrawler:
         ai_surfaces: list[Asset] = []
         errors: list[str] = []
         queue_limit_reported = False
+
+        def add_endpoint(
+            *,
+            page: Asset,
+            url: str,
+            method: str,
+            confidence: float,
+            metadata: dict,
+            relationship: str,
+        ) -> None:
+            normalized = normalize_url(page.url, url)
+            if not normalized:
+                return
+            if not self.request_manager.scope.is_in_scope(normalized):
+                return
+            method = method.upper().strip()
+            key = (method, normalized)
+            if key in seen_endpoints:
+                return
+            seen_endpoints.add(key)
+            counters["endpoint"] += 1
+            endpoint = EndpointAsset(
+                f"endpoint_{counters['endpoint']:04d}",
+                AssetType.ENDPOINT,
+                normalized,
+                normalized,
+                confidence,
+                metadata,
+                method,
+                None,
+            )
+            endpoints.append(endpoint)
+            if graph is not None:
+                graph.add_node(
+                    id=endpoint.id,
+                    type=endpoint.type.value,
+                    label=endpoint.name,
+                    attributes=endpoint.metadata,
+                )
+                graph.add_edge(source=page.id, target=endpoint.id, relationship=relationship)
+            for name, _ in parse_qsl(urlparse(normalized).query, keep_blank_values=True):
+                input_key = (normalized, name)
+                if not name or input_key in seen_query_inputs:
+                    continue
+                seen_query_inputs.add(input_key)
+                counters["input"] += 1
+                input_asset = InputAsset(
+                    f"input_{counters['input']:04d}",
+                    AssetType.INPUT,
+                    name,
+                    normalized,
+                    1.0,
+                    {"source_endpoint": normalized, "source_page": page.url},
+                    "query",
+                    "query",
+                    method,
+                )
+                inputs.append(input_asset)
+                if graph is not None:
+                    graph.add_node(
+                        id=input_asset.id,
+                        type=input_asset.type.value,
+                        label=input_asset.name,
+                        attributes=input_asset.metadata,
+                    )
+                    graph.add_edge(source=endpoint.id, target=input_asset.id, relationship="accepts")
 
         while queue and len(visited) < self.max_pages:
             url = queue.popleft()
@@ -179,50 +246,27 @@ class ReconCrawler:
                     else:
                         queue.append(link)
                         discovered.add(link)
-                if link in seen_endpoints:
-                    continue
-                seen_endpoints.add(link)
-                counters["endpoint"] += 1
-                endpoint = EndpointAsset(
-                    f"endpoint_{counters['endpoint']:04d}",
-                    AssetType.ENDPOINT,
-                    link,
-                    link,
-                    0.95,
-                    {},
-                    "GET",
-                    None,
+                add_endpoint(
+                    page=page,
+                    url=link,
+                    method="GET",
+                    confidence=0.95,
+                    metadata={"discovery": "html_link"},
+                    relationship="links_to",
                 )
-                endpoints.append(endpoint)
-                if graph is not None:
-                    graph.add_node(id=endpoint.id, type=endpoint.type.value, label=endpoint.name)
-                    graph.add_edge(source=page.id, target=endpoint.id, relationship="links_to")
-                for name, _ in parse_qsl(urlparse(link).query, keep_blank_values=True):
-                    key = (link, name)
-                    if not name or key in seen_query_inputs:
-                        continue
-                    seen_query_inputs.add(key)
-                    counters["input"] += 1
-                    input_asset = InputAsset(
-                        f"input_{counters['input']:04d}",
-                        AssetType.INPUT,
-                        name,
-                        link,
-                        1.0,
-                        {"source_endpoint": link, "source_page": response.url},
-                        "query",
-                        "query",
-                        "GET",
-                    )
-                    inputs.append(input_asset)
-                    if graph is not None:
-                        graph.add_node(
-                            id=input_asset.id,
-                            type=input_asset.type.value,
-                            label=input_asset.name,
-                            attributes=input_asset.metadata,
-                        )
-                        graph.add_edge(source=endpoint.id, target=input_asset.id, relationship="accepts")
+
+            for candidate in discover_api_endpoints(response.url, response.text):
+                add_endpoint(
+                    page=page,
+                    url=candidate.url,
+                    method=candidate.method,
+                    confidence=candidate.confidence,
+                    metadata={
+                        "discovery": "embedded_api_reference",
+                        "evidence": list(candidate.evidence),
+                    },
+                    relationship="references_api",
+                )
 
             for script in sorted(parser.result.scripts):
                 if not self.request_manager.scope.is_in_scope(script) or script in seen_js:
