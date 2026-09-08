@@ -4,72 +4,52 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from knowledge_store import KnowledgeStore
 from models import Asset, Finding
 from security_modules import ModuleContext, ModuleStage, module_index
 
 
 @dataclass(frozen=True, slots=True)
 class ModuleSelection:
-    """A security module selected for the current scan and why it is relevant."""
-
     module_id: str
     reason: str = ""
 
 
 @dataclass(frozen=True, slots=True)
 class ScanPlan:
-    """Ordered security-module plan produced by defaults or the AI planner."""
-
     selections: tuple[ModuleSelection, ...]
     source: str = "default"
 
 
 @dataclass(frozen=True, slots=True)
 class ScanResult:
-    """Normalized result of a scanner run."""
-
     target: str
     assets: tuple[Asset, ...]
     findings: tuple[Finding, ...]
     modules_run: tuple[str, ...]
     errors: tuple[str, ...] = ()
+    knowledge: KnowledgeStore | None = None
 
 
 def default_module_selection(*, include_nmap: bool = False) -> ScanPlan:
-    """Return the baseline plan in the intended Phobos execution order.
-
-    Web and AI vulnerability modules form the main assessment. Nmap is an
-    optional Web-domain security module and, when selected, is always appended
-    as a supplemental test after the main Web/AI assessment.
-    """
     selected = [
         ModuleSelection("web.headers", "baseline web hardening"),
         ModuleSelection("web.cookies", "session security baseline"),
         ModuleSelection("web.exposure", "common exposure checks"),
         ModuleSelection("web.methods", "review discovered HTTP methods"),
-        ModuleSelection("web.params", "prioritize discovered input surfaces"),
         ModuleSelection("web.config", "common configuration exposure"),
         ModuleSelection("ai.prompt_injection", "test identified AI input boundaries"),
         ModuleSelection("ai.data_disclosure", "test model-mediated data exposure"),
         ModuleSelection("ai.tool_abuse", "test AI-controlled tool boundaries"),
         ModuleSelection("ai.excessive_agency", "test unintended AI-mediated actions"),
+        ModuleSelection("cross_layer.attack_path", "correlate Web and AI evidence"),
     ]
     if include_nmap:
         selected.append(ModuleSelection("web.nmap", "supplemental web-facing service vulnerability check"))
     return ScanPlan(tuple(selected), source="default")
 
 
-def merge_module_selections(
-    base: ScanPlan,
-    additions: Iterable[ModuleSelection],
-    *,
-    source: str | None = None,
-) -> ScanPlan:
-    """Merge module selections while keeping supplemental modules last.
-
-    The AI/CLI can add modules without accidentally placing a supplemental tool
-    such as Nmap before the core Web/AI assessment.
-    """
+def merge_module_selections(base: ScanPlan, additions: Iterable[ModuleSelection], *, source: str | None = None) -> ScanPlan:
     catalog = module_index()
     combined = list(base.selections)
     seen = {item.module_id for item in combined}
@@ -77,23 +57,16 @@ def merge_module_selections(
         if selection.module_id not in seen:
             combined.append(selection)
             seen.add(selection.module_id)
-
-    stage_order = {
-        ModuleStage.WEB_AI: 0,
-        ModuleStage.FOLLOW_UP: 1,
-        ModuleStage.SUPPLEMENTAL: 2,
-    }
+    stage_order = {ModuleStage.WEB_AI: 0, ModuleStage.FOLLOW_UP: 1, ModuleStage.SUPPLEMENTAL: 2}
     combined.sort(key=lambda item: stage_order[catalog[item.module_id].stage])
     return ScanPlan(tuple(combined), source=source or base.source)
 
 
 def validate_plan(plan: ScanPlan) -> ScanPlan:
-    """Reject unknown modules, duplicates, and invalid stage ordering."""
     catalog = module_index()
     seen: set[str] = set()
     validated: list[ModuleSelection] = []
     seen_supplemental = False
-
     for selection in plan.selections:
         spec = catalog.get(selection.module_id)
         if spec is None:
@@ -103,17 +76,13 @@ def validate_plan(plan: ScanPlan) -> ScanPlan:
         if spec.stage is ModuleStage.SUPPLEMENTAL:
             seen_supplemental = True
         elif seen_supplemental:
-            raise ValueError(
-                f"security module {selection.module_id} cannot run after a supplemental module"
-            )
+            raise ValueError(f"security module {selection.module_id} cannot run after a supplemental module")
         seen.add(selection.module_id)
         validated.append(selection)
-
     return ScanPlan(tuple(validated), source=plan.source)
 
 
 def module_domains(plan: ScanPlan) -> tuple[str, ...]:
-    """Return the unique target areas represented by a plan."""
     catalog = module_index()
     domains: list[str] = []
     for selection in plan.selections:
@@ -130,31 +99,35 @@ def execute_plan(
     *,
     runners: dict[str, Any] | None = None,
     metadata: dict[str, Any] | None = None,
+    knowledge: KnowledgeStore | None = None,
 ) -> ScanResult:
-    """Run registered deterministic security modules and normalize output.
-
-    Low-level HTTP/browser/network execution is injected through runners. The
-    planner therefore decides *what* should be tested while modules decide
-    *how* their declared security procedure is executed.
-    """
+    """Execute modules against one shared mutable security knowledge state."""
     plan = validate_plan(plan)
-    context = ModuleContext(target=target, assets=assets, metadata=dict(metadata or {}))
+    store = knowledge or KnowledgeStore()
+    store.add_assets(assets)
     runner_map = runners or {}
     catalog = module_index()
-    findings: list[Finding] = []
-    errors: list[str] = []
     modules_run: list[str] = []
+    errors: list[str] = []
 
     for selection in plan.selections:
         spec = catalog[selection.module_id]
         runner = runner_map.get(selection.module_id)
         if runner is None:
             continue
+        context = ModuleContext(
+            target=target,
+            assets=tuple(store.assets),
+            knowledge=store,
+            metadata=dict(metadata or {}),
+        )
         try:
             result = tuple(runner(context))
-            findings.extend(item for item in result if isinstance(item, Finding))
+            for item in result:
+                if isinstance(item, Finding):
+                    store.add_finding(item)
             modules_run.append(spec.id)
         except Exception as exc:
             errors.append(f"{spec.id}: {type(exc).__name__}: {exc}")
 
-    return ScanResult(target, assets, tuple(findings), tuple(modules_run), tuple(errors))
+    return ScanResult(target, tuple(store.assets), store.findings, tuple(modules_run), tuple(errors), store)
