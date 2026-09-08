@@ -2,63 +2,130 @@
 
 ## The project
 
-Phobos is a practical security engineering project focused on understanding how modern web applications and AI systems behave as connected systems, not isolated components.
+Phobos is an AI-assisted security testing framework for **web applications that contain AI functionality**.
 
-The framework combines **network reconnaissance, web security, AI security, offensive security, and software engineering** into one workflow designed to discover attack surfaces, model relationships, preserve evidence, and eventually test security consequences across components.
-
-The goal is not another collection of disconnected scanners. Phobos is intended to become a framework where a discovered network service can be connected to an HTTP endpoint, an application input, an AI agent, a tool, and the resource that tool can reach — creating a usable model of the real attack path.
-
-## Core principle
-
-> **Map the system before you attack the model.**
-
-That starts with engineering fundamentals: strict scope control, bounded network and HTTP discovery, deterministic data models, a shared attack-surface graph, evidence-backed results, and clear separation between reconnaissance and active assessment.
-
-AI-specific testing comes after that foundation, so findings can be understood in context rather than as isolated model behavior.
-
-## Current focus
-
-The current build is centered on:
-
-- bounded Nmap-based network service discovery
-- web pages, endpoints, forms, inputs, and JavaScript discovery
-- passive API-route discovery from application code
-- passive detection of likely AI endpoints, providers, agent signals, and AI-oriented inputs
-- graph-based representation of discovered relationships
-- reusable security-assessment procedures
-- bounded execution and evidence correlation
-
-The first real validation environment is **authorized PortSwigger Web Security Academy labs**. Phobos should be tested against real targets and should learn reusable vulnerability procedures rather than depending on synthetic targets.
-
-## Engineering approach
-
-Phobos is developed incrementally. Each layer should be useful on its own, easy to test, and strong enough to support the layer that comes next.
+The scanner's security scope is broad. Once an AI-enabled web application is identified, Phobos can investigate ordinary web vulnerabilities as well as vulnerabilities created by the application's AI integration.
 
 ```text
-Scope
-   ↓
+AI-enabled website
+       ↓
+   web security
+       +
+    AI security
+```
+
+Nmap is only an optional supporting module for host/service context. It is not the project's primary focus.
+
+## The core idea
+
+> **The modules test. The AI thinks.**
+
+Deterministic Phobos components handle discovery, HTTP/browser execution, known security checks, and evidence collection. The AI acts as the reasoning layer that can prioritize modules, interpret discoveries, connect observations, and determine what should be investigated next.
+
+The AI does not receive unrestricted machine access. Phobos remains responsible for scope, execution, validation, and evidence.
+
+## Security coverage
+
+The intended scanner covers both:
+
+```text
+Web security
+- authentication
+- authorization / access control
+- sessions
+- input validation
+- injection
+- XSS
+- SSRF
+- file uploads
+- API security
+- configuration exposure
+- common web weaknesses
+
+AI security
+- prompt injection
+- indirect prompt injection
+- data disclosure
+- system-prompt exposure
+- tool abuse
+- excessive agency
+- insecure output handling
+- retrieval/context attacks
+- cross-user isolation
+```
+
+The important distinction is that AI security is **one part of the overall assessment**, not the only type of vulnerability Phobos looks for.
+
+## Architecture
+
+```text
+Target + Scope
+      ↓
+Discovery
+ ├─ Web
+ ├─ AI
+ └─ Nmap (optional)
+      ↓
+Attack-Surface Model
+      ↓
+AI Reasoning / Prioritization
+      ↓
+Security Modules
+      ↓
+HTTP / Browser Execution
+      ↓
+Observations + Evidence
+      ↓
+Correlation
+      ↓
+Finding
+```
+
+Each module should be independently testable and exposed through a stable interface so the scanner can grow without rebuilding the core.
+
+## First real target
+
+The first validation environment is **authorized PortSwigger Web Security Academy labs**.
+
+The objective is to prove the complete loop on a real target:
+
+```text
 Discover
    ↓
-Normalize
+Understand
    ↓
-Connect
-   ↓
-Reason
+Prioritize
    ↓
 Test
    ↓
-Correlate
+Observe
+   ↓
+Validate
    ↓
 Report
 ```
 
-The long-term objective is a security framework that can move from **"What is exposed?"** to **"How are these components connected?"** and finally to **"What security consequences follow from those connections?"**
+The first PortSwigger integration should establish one reusable vulnerability procedure rather than a one-off script for a single lab.
 
-## Why the name
+## Development philosophy
 
-Phobos is one of Mars' two moons and the source of the project's identity: a name associated with observing an environment that can be difficult to understand from the surface.
+Phobos is deliberately being built in layers. The scanner should become useful before it becomes autonomous.
 
-For this project, the name represents the same security principle: get close enough to understand the system before attempting to break it.
+```text
+Strong discovery
+      ↓
+Strong module interfaces
+      ↓
+Real vulnerability checks
+      ↓
+Reliable evidence
+      ↓
+AI-guided iteration
+```
+
+The long-term goal is a tool that can look at an AI-enabled web application and continuously answer:
+
+> **What is exposed, what can be attacked, what should I test next, and what evidence proves the result?**
 
 ---
 
