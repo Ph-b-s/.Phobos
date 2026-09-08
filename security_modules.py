@@ -3,13 +3,10 @@
 Phobos keeps the repository physically flat while using explicit module domains
 and stages to keep responsibilities separate:
 
-* ``web`` modules test the web target, including the optional Nmap module.
+* ``web`` modules test the web target, including browser/JavaScript behavior and Nmap.
 * ``ai`` modules test the AI target and its model/agent behavior.
-* ``cross_layer`` modules test vulnerabilities that cross the Web <-> AI boundary.
-
-The catalog is deliberately descriptive. A module is only executable when a
-runner is registered by the scanner; catalog entries must never be mistaken for
-implemented attack logic.
+* ``cross_layer`` modules correlate vulnerabilities and trust/data/control flow
+  between Web and AI rather than acting as a second scanner.
 """
 from __future__ import annotations
 
@@ -93,11 +90,11 @@ class PassiveSecurityModule:
         return tuple(findings)
 
 
-# This is the source of truth for the vulnerability toolbox. Planned modules
-# are catalogued now so the AI can understand Phobos' intended coverage, but
-# ``implemented`` remains false until deterministic execution exists.
+# Source of truth for the vulnerability toolbox. Catalog entries describe the
+# intended capability map; implemented=False remains until deterministic
+# execution exists.
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
-    # ------------------------------- Web ---------------------------------
+    # -------------------------------- Web ---------------------------------
     ModuleSpec("web.headers", "Security headers", "Check response security headers and policy gaps.", ModuleDomain.WEB),
     ModuleSpec("web.cookies", "Cookie security", "Check Secure, HttpOnly, SameSite, scope, and session-cookie behavior.", ModuleDomain.WEB),
     ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB),
@@ -127,6 +124,9 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.business_logic", "Business logic", "Test workflows for abuse, state confusion, and invariant violations.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.info_disclosure", "Information disclosure", "Check responses and interfaces for unintended sensitive data exposure.", ModuleDomain.WEB),
     ModuleSpec("web.config", "Configuration security", "Check deployment and application configuration weaknesses.", ModuleDomain.WEB),
+    ModuleSpec("web.browser_runtime", "Browser runtime", "Use a real browser to execute JavaScript, observe rendered DOM, and capture runtime requests.", ModuleDomain.WEB, active=True, tool="playwright"),
+    ModuleSpec("web.client_javascript", "Client-side JavaScript", "Inspect and test browser-side JavaScript routes, sinks, and application behavior.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.api", "API security", "Test discovered HTTP APIs, including authorization, input validation, and state transitions.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.nmap", "Nmap security module", "Optional Nmap-backed service and web-facing vulnerability checks after web/AI testing.", ModuleDomain.WEB, stage=ModuleStage.SUPPLEMENTAL, active=True, tool="nmap"),
 
     # -------------------------------- AI ---------------------------------
@@ -146,10 +146,13 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("ai.context_manipulation", "Context manipulation", "Test memory and contextual state for attacker-controlled influence.", ModuleDomain.AI, active=True),
 
     # ---------------------------- Cross-layer -----------------------------
-    ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether web authorization boundaries are preserved when AI functionality is involved.", ModuleDomain.CROSS_LAYER, active=True),
-    ModuleSpec("cross_layer.prompt_to_web", "Prompt-to-web escalation", "Test whether model-controlled reasoning can reach unsafe web actions or endpoints.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.tool_to_web", "Tool-to-web escalation", "Test whether AI tools can cross web trust boundaries or invoke unauthorized functionality.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.data_flow", "Web/AI data-flow abuse", "Test sensitive data crossing between web application and AI contexts.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.web_to_ai", "Web to AI flow", "Correlate attacker-controlled Web inputs with downstream AI context or decisions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.ai_to_web", "AI to Web flow", "Correlate AI output or decisions with downstream Web/backend sinks.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether user authorization is preserved when AI functionality performs actions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.data_flow", "Web/AI data-flow abuse", "Trace sensitive data across Web and AI contexts for unintended exposure or influence.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.control_flow", "Web/AI control-flow abuse", "Detect AI-mediated changes to an application's intended execution path.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.capability_escalation", "Capability escalation", "Detect cases where AI access expands attacker-controlled or user-level capability.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.attack_path", "Cross-layer attack paths", "Correlate Web and AI evidence into bounded multi-step attack paths for follow-up testing.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
 )
 
 
@@ -165,7 +168,4 @@ def module_index() -> dict[str, ModuleSpec]:
 
 def executable_module_ids() -> frozenset[str]:
     """Return modules that have an implementation registered today."""
-    # Execution registration is intentionally kept in the scanner layer. This
-    # function is the future extension point; the current implementation does
-    # not pretend catalog entries are runnable.
     return frozenset()
