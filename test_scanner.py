@@ -1,16 +1,25 @@
 from models import Asset, AssetType
-from scanner import ScanPlan, ModuleSelection, default_module_selection, execute_plan, validate_plan
+from scanner import (
+    ModuleSelection,
+    ScanPlan,
+    default_module_selection,
+    execute_plan,
+    merge_module_selections,
+    validate_plan,
+)
 
 
-def test_default_plan_is_broad_but_nmap_optional():
+def test_default_plan_keeps_nmap_as_last_optional_web_module():
     plan = default_module_selection()
     ids = [item.module_id for item in plan.selections]
     assert "web.headers" in ids
     assert "web.injection" not in ids
     assert "network.nmap" not in ids
+    assert "web.nmap" not in ids
 
     nmap_plan = default_module_selection(include_nmap=True)
-    assert "network.nmap" in [item.module_id for item in nmap_plan.selections]
+    nmap_ids = [item.module_id for item in nmap_plan.selections]
+    assert nmap_ids[-1] == "web.nmap"
 
 
 def test_plan_validation_rejects_unknown_modules():
@@ -27,6 +36,33 @@ def test_plan_validation_deduplicates_modules():
         ScanPlan((ModuleSelection("web.headers"), ModuleSelection("web.headers", "duplicate")))
     )
     assert [item.module_id for item in plan.selections] == ["web.headers"]
+
+
+def test_merge_keeps_supplemental_modules_last():
+    base = default_module_selection(include_nmap=True)
+    merged = merge_module_selections(
+        base,
+        [ModuleSelection("web.xss", "AI-selected"), ModuleSelection("ai.rag", "AI-selected")],
+    )
+    ids = [item.module_id for item in merged.selections]
+    assert ids[-1] == "web.nmap"
+    assert ids.index("web.xss") < ids.index("web.nmap")
+    assert ids.index("ai.rag") < ids.index("web.nmap")
+
+
+def test_plan_validation_rejects_module_after_supplemental():
+    plan = ScanPlan(
+        (
+            ModuleSelection("web.nmap"),
+            ModuleSelection("web.xss"),
+        )
+    )
+    try:
+        validate_plan(plan)
+    except ValueError as exc:
+        assert "cannot run after a supplemental module" in str(exc)
+    else:
+        raise AssertionError("invalid stage ordering was accepted")
 
 
 def test_execute_plan_is_module_driven():
