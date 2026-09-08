@@ -6,9 +6,7 @@
 
 **Find web vulnerabilities. Let AI reason about what to test next.**
 
-Phobos is a security testing framework for **web applications that contain AI functionality**. Its purpose is broad web security assessment: authentication, authorization, injection, XSS, SSRF, file handling, configuration, APIs, exposed services, and AI-specific weaknesses are all part of the same scanner.
-
-The AI is not the only target. **The AI is the brain that helps Phobos understand the application, prioritize security modules, correlate observations, and decide where deeper testing is useful.**
+Phobos is a security testing framework for **web applications that contain AI functionality**. It assesses the application's web and AI attack surfaces together, using AI reasoning to prioritize vulnerability testing.
 
 </div>
 
@@ -16,69 +14,92 @@ The AI is not the only target. **The AI is the brain that helps Phobos understan
 
 ## Product definition
 
-Phobos has one defining constraint:
+Phobos has two target surfaces:
 
-> **It scans web applications that have meaningful AI functionality, but once inside that application it looks for the full range of relevant web-security weaknesses.**
+- **Web** — the application's normal web, API, browser, and service-facing functionality.
+- **AI** — the application's LLM, agent, tool, retrieval, and AI-mediated functionality.
 
-The architecture is:
+The AI inside Phobos is the **security brain**. It does not replace the scanners and it is not itself the target. It interprets the discovered attack surface, selects useful vulnerability modules, correlates evidence, and chooses the next useful test.
+
+### High-level structure
 
 ```text
-                  AI-enabled web application
-                             │
-                             ▼
-                  Web + AI discovery
-                             │
-                             ▼
-                   Attack-surface model
-                             │
-                             ▼
-                      AI security brain
-                             │
-                   plan / prioritize / reason
-                             │
-                             ▼
-                    Security modules
-                             │
-                ┌────────────┼────────────┐
-                ▼            ▼            ▼
-             Web tests    AI tests    Nmap module
-                                          (optional)
-                └────────────┼────────────┘
-                             ▼
-                    Evidence / validation
-                             │
-                             ▼
-                           Findings
+                         AI-ENABLED WEB APPLICATION
+                                      │
+                         ┌────────────┴────────────┐
+                         ▼                         ▼
+                    WEB TARGET                 AI TARGET
+                         │                         │
+                         └────────────┬────────────┘
+                                      ▼
+                            ATTACK-SURFACE MODEL
+                                      │
+                                      ▼
+                                  AI "BRAIN"
+                                      │
+                                      ▼
+                           VULNERABILITY MODULES
+                                      │
+                    ┌─────────────────┼─────────────────┐
+                    │                 │                 │
+                    ▼                 ▼                 ▼
+                WEB MODULES       AI MODULES      CROSS-LAYER
+                    │                 │                 │
+                    │                 │            Web ↔ AI
+                    │                 │            AI ↔ Web
+                    │                 │                 │
+                    └─────────────────┼─────────────────┘
+                                      ▼
+                              EVIDENCE / FINDINGS
+                                      │
+                                      ▼
+                               AI REEVALUATES
+                                      │
+                                      ▼
+                              NEXT TEST / MODULE
 ```
 
-Nmap is **one security module**. It is not a separate discovery pipeline and does not define the architecture.
+**Web and AI are targets. Modules are the capabilities used to search those targets for vulnerabilities.** Nmap is one Web module, not a third target and not a separate scanner architecture.
 
 ---
 
 # What Phobos should find
 
-### Standard web vulnerabilities
+### Web vulnerabilities
 
 ```text
 Authentication
 Authorization / access control
 Session weaknesses
 HTTP method weaknesses
-Security-header problems
-Cookie security problems
-Input-validation flaws
-SQL injection
+Security headers / cookies
+Input validation
+SQL / NoSQL injection
 XSS
+CSRF
 SSRF
-File-upload flaws
-Path / file exposure
+Command injection
+Path traversal
+File upload
+XXE
+SSTI
+Deserialization
+CORS
+Cache poisoning / deception
+HTTP request smuggling
+Host-header attacks
+JWT weaknesses
+GraphQL security
+WebSocket security
+Race conditions
+Business-logic flaws
+Information disclosure
 Configuration exposure
-API security problems
-Parameter tampering
+API security
 Service-level weaknesses
 ```
 
-### AI-related vulnerabilities
+### AI vulnerabilities
 
 ```text
 Direct prompt injection
@@ -90,18 +111,30 @@ Tool abuse
 Insecure output handling
 Retrieval / context poisoning
 Cross-user context leakage
-Multi-step AI attack chains
+Memory / context manipulation
+Goal hijacking
+Identity / privilege abuse
+Multi-step agent attack chains
+Resource / cost abuse
 ```
 
-**AI-specific vulnerabilities are an extension of the web-security scanner, not a replacement for it.**
+### Cross-layer vulnerabilities
+
+```text
+Web → AI trust-boundary attacks
+AI → Web actions
+AI → internal-service access
+Prompt injection → tool abuse chains
+Authorization failures across Web and AI
+Data leakage across application and AI contexts
+Multi-step Web ↔ AI attack chains
+```
 
 ---
 
 # AI as the security brain
 
-Phobos should not give the model unrestricted control of the machine. Instead, the model receives structured application context and chooses from registered security capabilities.
-
-The reasoning loop is:
+Phobos does not give the model unrestricted control of the host. The model receives structured application context and chooses from registered security capabilities.
 
 ```text
 Reconnaissance
@@ -114,32 +147,54 @@ Security module selection
       ↓
 Controlled execution
       ↓
-Evidence
+Evidence / observations
       ↓
 AI reevaluation
       ↓
 Next useful test
 ```
 
-For example:
+The AI decides **what is worth testing next**. Deterministic modules decide **how the authorized test is executed**. Phobos controls the target, scope, requests, tools, and evidence.
+
+The AI may not change the target, bypass scope, execute arbitrary shell commands, or manufacture findings without evidence.
+
+---
+
+# Vulnerability module architecture
+
+The repository stays physically flat. Logical separation is provided by module contracts and stable IDs.
 
 ```text
-Discover login + user input
-          ↓
-AI identifies authentication / access-control risk
-          ↓
-Run access-control module
-          ↓
-Interesting object-level behavior discovered
-          ↓
-AI prioritizes authorization follow-up
-          ↓
-Run next test
+VULNERABILITY MODULES
+│
+├── WEB MODULES
+│   ├── web.headers
+│   ├── web.cookies
+│   ├── web.exposure
+│   ├── web.methods
+│   ├── web.params
+│   ├── web.auth
+│   ├── web.access_control
+│   ├── web.injection
+│   ├── web.xss
+│   ├── web.sqli
+│   ├── web.ssrf
+│   ├── web.uploads
+│   ├── web.config
+│   └── web.nmap
+│
+├── AI MODULES
+│   ├── ai.surface
+│   ├── ai.prompt_injection
+│   ├── ai.data_disclosure
+│   ├── ai.tool_abuse
+│   └── ai.excessive_agency
+│
+└── CROSS-LAYER MODULES
+    └── Web ↔ AI security procedures
 ```
 
-This feedback loop is the reason AI is integrated into Phobos.
-
-The AI chooses from Phobos' registered modules. It does not change the target, bypass scope, execute arbitrary shell commands, or directly manufacture findings.
+A module is a **testing capability**, not a target. The catalog can contain capabilities that are planned but not yet fully implemented.
 
 ---
 
@@ -166,28 +221,16 @@ Security Module Plan
  ▼
 Module Runner
  │
- ├── web.headers
- ├── web.cookies
- ├── web.exposure
- ├── web.methods
- ├── web.params
- ├── web.auth
- ├── web.access_control
- ├── web.injection
- ├── web.xss
- ├── web.sqli
- ├── web.ssrf
- ├── web.uploads
- ├── web.config
- ├── ai.surface
- ├── ai.prompt_injection
- ├── ai.data_disclosure
- ├── ai.tool_abuse
- ├── ai.excessive_agency
- └── web.nmap
+ ├── Web security modules
+ │     ├── HTTP / browser checks
+ │     └── Nmap
+ │
+ ├── AI security modules
+ │
+ └── Cross-layer security modules
  │
  ▼
-HTTP / Browser / Nmap execution
+Controlled HTTP / Browser / Nmap execution
  │
  ▼
 Structured observations
@@ -197,25 +240,32 @@ Evidence + correlation
  │
  ▼
 Findings
+ │
+ ▼
+AI reevaluation
+ │
+ ▼
+Next module / test
 ```
 
-The repository remains physically flat. Logical separation comes from module contracts and stable IDs rather than a large folder hierarchy.
+Nmap is therefore downstream of discovery and planning. It is invoked as a Web security capability when useful; it does not own discovery, planning, reporting, or the scan lifecycle.
 
 ---
 
-# Nmap
+# Nmap's role
 
-Nmap is optional and lives inside the normal security-module layer:
+Nmap belongs to the **Web module layer**.
+
+It is a tool Phobos can invoke to gather service-level security evidence and, as the module evolves, perform appropriate bounded vulnerability checks against the authorized target. An open port by itself is an observation, not a confirmed vulnerability.
 
 ```text
-Web discovery
-      ↓
-AI discovery
-      ↓
-Security testing
-      ├── web modules
-      ├── AI modules
-      └── Nmap module (optional)
+WEB TARGET
+    │
+    ▼
+AI selects useful testing capabilities
+    │
+    ├── HTTP / browser modules
+    └── web.nmap
 ```
 
 Use it with:
@@ -224,17 +274,13 @@ Use it with:
 phobos scan https://example.com --scope example.com --nmap
 ```
 
-Its purpose is to add service-level security evidence to the same assessment. An open service is an observation; a vulnerability finding requires the appropriate security check and evidence.
-
-Nmap does not get its own graph, planner, reporting path, or scanner core.
-
 ---
 
 # First PortSwigger target
 
 The first real benchmark is an authorized PortSwigger Web Security Academy lab.
 
-The objective is to prove one complete, reusable security-testing loop rather than hard-code a lab exploit:
+The goal is to prove a reusable end-to-end security loop rather than hard-code a lab exploit:
 
 ```text
 PortSwigger lab
@@ -254,15 +300,15 @@ AI reevaluates result
 Finding confirmed
 ```
 
-Nmap is available when it adds useful service-level context, but the first end-to-end success should not depend on it.
+Nmap is optional and should not be required for the first successful end-to-end vulnerability procedure.
 
-Lab-specific URLs, payload strings, credentials, and quirks belong in test fixtures, not in the generic security module.
+Lab-specific URLs, payloads, credentials, and quirks belong in test fixtures, not in generic module logic.
 
 ---
 
 # Current module direction
 
-The catalog represents the security coverage Phobos is being built toward:
+### Web
 
 ```text
 web.headers
@@ -278,17 +324,29 @@ web.sqli
 web.ssrf
 web.uploads
 web.config
+web.nmap
+```
 
+### AI
+
+```text
 ai.surface
 ai.prompt_injection
 ai.data_disclosure
 ai.tool_abuse
 ai.excessive_agency
-
-web.nmap
 ```
 
-The catalog is a contract, not a claim that every module is already fully implemented.
+### Cross-layer
+
+```text
+web_ai.auth_boundary
+web_ai.prompt_to_web
+web_ai.tool_to_web
+web_ai.data_flow
+```
+
+The module catalog describes the intended security capability surface. It does **not** claim that every listed module is implemented today.
 
 ---
 
@@ -299,13 +357,15 @@ Scope controls every outbound destination.
 
 Discovery describes the application; it does not automatically prove a flaw.
 
-Security modules perform the actual security checks.
+Security modules perform the actual vulnerability checks.
 
 AI reasons about context, prioritization, correlation, and the next test.
 
 Execution remains bounded and controlled by Phobos.
 
 Evidence is required before a finding is confirmed.
+
+Web and AI are target surfaces; modules are the testing capabilities.
 ```
 
 ---
@@ -324,16 +384,18 @@ Evidence is required before a finding is confirmed.
 - [x] Evidence storage
 - [x] Security-module catalog
 - [x] AI planning layer
-- [x] Optional Nmap security module
+- [x] Optional Nmap Web module
 - [x] Synthetic demo infrastructure removed
 
 ### Next implementation target
 
-- [ ] Connect real web-security modules to the module runner
+- [ ] Connect real Web vulnerability modules to the module runner
+- [ ] Connect real AI vulnerability modules to the module runner
 - [ ] Implement the first full PortSwigger vulnerability procedure
-- [ ] Improve request/response observations
+- [ ] Improve request / response observations
 - [ ] Build authenticated-session handling
 - [ ] Implement AI-guided iterative module selection
+- [ ] Implement cross-layer Web ↔ AI procedures
 - [ ] Produce reproducible findings and reports
 
 ### Web-security coverage
@@ -342,7 +404,7 @@ Evidence is required before a finding is confirmed.
 - [ ] Authorization / access-control testing
 - [ ] Injection testing
 - [ ] XSS testing
-- [ ] SQL injection testing
+- [ ] SQL / NoSQL injection testing
 - [ ] SSRF testing
 - [ ] File-upload testing
 - [ ] API security testing
@@ -356,6 +418,14 @@ Evidence is required before a finding is confirmed.
 - [ ] AI data disclosure
 - [ ] Tool abuse
 - [ ] Excessive agency
-- [ ] Retrieval/context attacks
+- [ ] Retrieval / context attacks
 - [ ] Cross-user isolation
 - [ ] Multi-step AI attack chains
+
+### Cross-layer coverage
+
+- [ ] Web → AI trust-boundary testing
+- [ ] AI → Web action testing
+- [ ] AI → internal-service access testing
+- [ ] Web/AI authorization-boundary testing
+- [ ] Multi-step Web ↔ AI attack chains
