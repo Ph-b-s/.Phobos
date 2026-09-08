@@ -27,6 +27,7 @@ py-modules = [
     "cli",
     "config",
     "crawler",
+    "cross_layer",
     "evidence",
     "graph",
     "models",
