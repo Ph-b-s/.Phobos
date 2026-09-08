@@ -1,174 +1,229 @@
-# Phobos Reconnaissance Architecture
+# Phobos Architecture
 
-Phobos is a web and AI security testing framework. Reconnaissance should build one useful target model; individual discovery techniques are modules that feed it.
+Phobos is an **AI-assisted web security scanner for web applications that contain AI functionality**.
 
-## 1. Target and scope
+The AI presence is the product's scope constraint and strategic advantage. The security scope itself is broad: once the target qualifies as an AI-enabled web application, Phobos should investigate the application's normal web attack surface as well as the AI-specific attack surface.
 
-The user supplies an authorized target and explicit scope. All discovery modules operate inside that boundary.
-
-```text
-Target
-  ↓
-Scope Validator
-  ↓
-Discovery modules
-```
-
-Nothing below this layer may invent a new target or bypass scope enforcement.
-
-## 2. Discovery modules
-
-The core focus is web and AI security. Nmap is an **optional reconnaissance module**, not a separate scanning subsystem.
+## 1. Core model
 
 ```text
-                 Reconnaissance
-                       │
-          ┌────────────┼────────────┐
-          ▼            ▼            ▼
-        Web           AI          Nmap
-     discovery     discovery     module
-          │            │            │
-          └────────────┴────────────┘
-                       ▼
-                 Attack Graph
+AI-enabled web application
+          ↓
+      Discovery
+          ↓
+   Attack-surface model
+          ↓
+    AI reasoning layer
+          ↓
+    Security module plan
+          ↓
+      Module runner
+          ↓
+   HTTP / Browser execution
+          ↓
+      Evidence
+          ↓
+  Correlation / validation
+          ↓
+        Finding
 ```
+
+The responsibilities are deliberately separated:
+
+```text
+Phobos core  → scope, execution, state, evidence
+Modules      → actual security checks
+AI           → reasoning, prioritization, correlation
+```
+
+The AI is never the authority for target selection or arbitrary machine access.
+
+## 2. Discovery
+
+Discovery builds enough context for both deterministic modules and AI reasoning.
 
 ### Web discovery
-
-The crawler discovers:
 
 ```text
 pages
 links
 forms
 inputs
+HTTP methods
 JavaScript
 API routes
 query parameters
 ```
 
-### AI-surface discovery
-
-AI discovery adds passive signals for likely:
+### AI discovery
 
 ```text
 AI endpoints
-providers
-agent/tool interfaces
+provider signals
+chat interfaces
+agent/tool signals
 AI-oriented inputs
 ```
 
-These are indicators, not findings.
+### Optional Nmap module
 
-### Nmap module
-
-Nmap answers one narrow question:
-
-> Which common TCP services are exposed by the target host?
-
-Its output is normalized into simple `port` assets so it can appear in the same graph as web assets.
-
-The intended relationship is deliberately small:
+Nmap is one small supporting module:
 
 ```text
 Target host
-    │
-    └── exposes ──> tcp/443
-                       │
-                       └── service: https
+    ↓
+Nmap
+    ↓
+open TCP ports / service hints
+    ↓
+shared asset model
 ```
 
-Nmap does **not** control the crawler, choose vulnerabilities, or become a second orchestration layer. Its results simply provide additional context for later testing.
+It exists to add useful network context and potentially expose services worth investigating. It is not a second scanner core.
 
-## 3. Unified attack-surface model
+## 3. Attack-surface model
 
-All discovery modules feed the same graph:
+All discovery results use the same graph:
 
 ```text
 Target
-  │
-  ├── exposes ──> Port
-  │
-  └── hosts ────> Web application
-                    │
-                    ├── contains ──> Page
-                    ├── contains ──> Form
-                    ├── links ─────> Endpoint
-                    ├── loads ─────> JavaScript
-                    └── signals ───> AI surface
+ ├── exposes → Port
+ └── hosts → Web application
+                ├── contains → Page
+                ├── contains → Form
+                ├── links → Endpoint
+                ├── loads → JavaScript
+                └── signals → AI Surface
 ```
 
-The graph is deliberately richer than a flat list but remains simple enough to support the first real PortSwigger tests.
-
-## 4. Testing layer
-
-After discovery, Phobos selects a vulnerability-specific procedure.
+Later relationships can extend the model to:
 
 ```text
-Attack Graph
-     ↓
-Applicable procedure
-     ↓
-Assessment Engine
-     ↓
-HTTP / Browser adapter
-     ↓
-Observations
-     ↓
-Evidence correlation
-     ↓
-Finding
+Endpoint
+   ↓
+Authentication boundary
+   ↓
+AI interface
+   ↓
+Agent
+   ↓
+Tool / API
+   ↓
+Resource
 ```
 
-A procedure describes an investigation and confirmation logic. It should not contain lab-specific URLs or depend on Nmap being present unless the vulnerability actually requires that information.
+## 4. Security-module layer
 
-## 5. First real target workflow
+Phobos does not rely on one monolithic vulnerability scanner. Capabilities are expressed as modules with stable IDs.
 
-For the first PortSwigger lab work, the intended flow is:
+The intended coverage includes:
 
 ```text
-1. Enter lab target + scope
-2. Run normal web reconnaissance
-3. Optionally run the Nmap module
-4. Merge discovered assets into the graph
-5. Identify the relevant attack surface
-6. Select one narrow assessment procedure
-7. Execute the smallest useful probe
-8. Capture evidence
-9. Confirm the vulnerability
-10. Produce a reproducible finding
+web.headers
+web.cookies
+web.exposure
+web.methods
+web.params
+web.auth
+web.access_control
+web.injection
+web.xss
+web.sqli
+web.ssrf
+web.uploads
+web.config
+
+ai.surface
+ai.prompt_injection
+ai.data_disclosure
+ai.tool_abuse
+ai.excessive_agency
+
+network.nmap
 ```
 
-Nmap is therefore a **supporting module** in step 3, not the center of the workflow.
+The catalog is the stable contract. Individual modules can mature independently.
 
-## 6. Long-term boundaries
+## 5. AI reasoning loop
 
-The repository can stay physically flat while keeping these logical responsibilities:
+The AI should not simply receive a natural-language command and choose one scanner.
+
+The intended loop is:
 
 ```text
-Scope / Policy
-      │
-      ├── Web Discovery
-      ├── AI Surface Discovery
-      └── Nmap Module (optional)
-                  │
-                  ▼
-          Attack-Surface Graph
-                  │
-                  ▼
-         Assessment Procedures
-                  │
-                  ▼
-          Assessment Engine
-                  │
-                  ▼
-       Execution Adapters
-                  │
-                  ▼
-       Observations / Evidence
-                  │
-                  ▼
-             Findings
+Recon result
+    ↓
+Structured target context
+    ↓
+AI prioritization
+    ↓
+Module selection
+    ↓
+Module execution
+    ↓
+New evidence
+    ↓
+AI reevaluates context
+    ↓
+Next highest-value test
 ```
 
-The guiding principle is simple: **Nmap enriches Phobos; it does not redefine Phobos.**
+This is the core advantage of Phobos over a conventional fixed-order scanner.
+
+For example:
+
+```text
+1. Discover login + user-controlled parameter
+2. AI prioritizes authentication and access-control checks
+3. Access-control module finds an interesting object reference
+4. New evidence is added
+5. AI prioritizes authorization testing around that object
+6. A confirmed access-control issue becomes the basis for further investigation
+```
+
+The AI should guide the sequence; deterministic modules should establish the technical evidence.
+
+## 6. Assessment procedures
+
+A module may contain one or more reusable assessment procedures.
+
+A procedure defines:
+
+```text
+prerequisites
+required assets
+safe probe
+observations to collect
+confirmation logic
+optional impact validation
+```
+
+A PortSwigger lab should be treated as a benchmark fixture, not as the implementation itself.
+
+## 7. First PortSwigger milestone
+
+The first real benchmark should prove the complete pipeline with one vulnerability class:
+
+```text
+PortSwigger lab
+      ↓
+Recon
+      ↓
+Relevant surface identified
+      ↓
+AI chooses / prioritizes module
+      ↓
+Procedure executes
+      ↓
+Evidence collected
+      ↓
+Finding confirmed
+```
+
+After that works reliably, the same architecture can be used to add more vulnerability classes.
+
+## 8. Design rule
+
+> **Phobos is not an AI vulnerability scanner with web features. It is a web security scanner for AI-enabled applications, with AI integrated as the reasoning brain.**
+
+That distinction should guide every future architectural decision.
