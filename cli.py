@@ -12,6 +12,7 @@ from crawler import ReconCrawler
 from evidence import EvidenceStore
 from graph import Graph
 from models import Asset, AssetType
+from nmap_runner import NmapError, run_top_ports_scan
 from request_manager import RequestError, RequestManager
 from scope import ScopeValidator
 
@@ -24,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"Phobos {PHOBOS_VERSION}")
     sub = parser.add_subparsers(dest="command")
 
-    scan = sub.add_parser("scan", help="run scoped passive web reconnaissance")
+    scan = sub.add_parser("scan", help="run scoped web reconnaissance")
     scan.add_argument("target", help="absolute HTTP(S) target URL")
     scan.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
     scan.add_argument("--output", default=".phobos")
@@ -32,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-pages", type=int, default=100)
     scan.add_argument("--max-discovered-urls", type=int, default=5_000)
     scan.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
+    scan.add_argument("--nmap", action="store_true", help="optionally enrich reconnaissance with Nmap top-100 TCP discovery")
     scan.add_argument("--allow-private-targets", action="store_true")
 
     agent = sub.add_parser(
@@ -47,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     agent.add_argument("--max-discovered-urls", type=int, default=5_000)
     agent.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     agent.add_argument("--dry-run", action="store_true", help="plan only; do not send web requests")
+    agent.add_argument("--nmap", action="store_true", help="optionally enrich reconnaissance with Nmap top-100 TCP discovery")
     agent.add_argument("--allow-private-targets", action="store_true")
 
     doctor = sub.add_parser("doctor", help="check the local Phobos environment")
@@ -127,6 +130,35 @@ def run_scan(args: argparse.Namespace, *, focus: str | None = None, plan_reason:
         print(f"  Plan:   {plan_reason}")
     print()
 
+    network_ports: list[Asset] = []
+    nmap_error: str | None = None
+    if args.nmap:
+        try:
+            nmap = run_top_ports_scan(config.target, scope, timeout=max(30.0, args.timeout * 6))
+            for index, port in enumerate(nmap.ports, 1):
+                asset = Asset(
+                    id=f"port_{index:04d}",
+                    type=AssetType.PORT,
+                    name=f"{port.protocol}/{port.port}",
+                    metadata={
+                        "protocol": port.protocol,
+                        "port": port.port,
+                        "state": port.state,
+                        "service": port.service,
+                        "product": port.product,
+                        "version": port.version,
+                        "reason": port.reason,
+                    },
+                    confidence=1.0,
+                )
+                network_ports.append(asset)
+                graph.add_node(id=asset.id, type=asset.type.value, label=asset.name, attributes=asset.metadata)
+                graph.add_edge(source=website.id, target=asset.id, relationship="exposes")
+            print(f"✓ Nmap: {len(network_ports)} open TCP ports discovered")
+        except NmapError as exc:
+            nmap_error = str(exc)
+            print(f"! Nmap module unavailable: {exc}")
+
     try:
         result = ReconCrawler(
             manager,
@@ -143,17 +175,18 @@ def run_scan(args: argparse.Namespace, *, focus: str | None = None, plan_reason:
                 "status": "failed",
                 "focus": focus,
                 "error": str(exc),
+                "nmap": {"enabled": args.nmap, "error": nmap_error},
             },
         )
         store.write_json("graph.json", graph.to_dict())
-        store.write_json("assets.json", [website.to_dict()])
+        store.write_json("assets.json", [website.to_dict(), *(item.to_dict() for item in network_ports)])
         store.write_json("findings.json", [])
         print(f"✗ Scan stopped: {exc}", file=sys.stderr)
         return 2
 
     for page in result.pages:
         graph.add_edge(source=website.id, target=page.id, relationship="hosts")
-    assets = [website, *result.assets]
+    assets = [website, *network_ports, *result.assets]
     store.write_json(
         "scan.json",
         {
@@ -169,12 +202,14 @@ def run_scan(args: argparse.Namespace, *, focus: str | None = None, plan_reason:
                 "endpoints": len(result.endpoints),
                 "javascript_files": len(result.javascript),
                 "ai_surfaces": len(result.ai_surfaces),
-                "errors": len(result.errors),
+                "open_tcp_ports": len(network_ports),
+                "errors": len(result.errors) + (1 if nmap_error else 0),
             },
             "crawler": {
                 "max_pages": config.max_pages,
                 "max_discovered_urls": config.max_discovered_urls,
             },
+            "nmap": {"enabled": args.nmap, "error": nmap_error},
             "security": {"allow_private_targets": config.allow_private_targets},
             "ai_plan": {"reason": plan_reason} if plan_reason else None,
         },
