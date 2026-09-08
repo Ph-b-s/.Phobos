@@ -1,8 +1,9 @@
-"""Venice AI planner for safe, web-focused Phobos actions.
+"""AI reasoning layer for Phobos security scanning.
 
-The model plans only between predefined Phobos capabilities. It never receives
-shell access, target selection authority, HTTP execution authority, or the
-ability to provide arbitrary tool arguments.
+The model acts as a constrained security-planning brain. It can select from
+registered Phobos security modules and explain prioritization, but it cannot
+change scope, execute shell commands, invent arbitrary requests, or directly
+report a vulnerability without evidence from the scanners.
 """
 from __future__ import annotations
 
@@ -14,13 +15,16 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from security_modules import module_index
+
 MODEL_NAME = "venice-uncensored"
 DEFAULT_BASE_URL = "https://api.venice.ai/api/v1/chat/completions"
-MAX_REQUEST_CHARS = 4_000
+MAX_REQUEST_CHARS = 8_000
 MAX_RESPONSE_BYTES = 1_000_000
-MAX_REASON_CHARS = 500
-SUPPORTED_ACTIONS = frozenset({"web_recon", "ai_surface_discovery", "refuse"})
-REQUIRED_DECISION_KEYS = frozenset({"action", "reason"})
+MAX_REASON_CHARS = 800
+MAX_MODULES = 16
+SUPPORTED_ACTIONS = frozenset({"plan_scan", "refuse"})
+REQUIRED_DECISION_KEYS = frozenset({"action", "modules", "reason"})
 
 
 class AIError(RuntimeError):
@@ -48,15 +52,27 @@ class AIConfig:
         return cls(base_url=base_url, model=model, api_key=api_key)
 
 
-SYSTEM_PROMPT = """You are the planning component of Phobos, an authorized web and AI security testing tool.
-Your ONLY supported actions are:
-- web_recon: scoped passive web reconnaissance of the explicit target
-- ai_surface_discovery: scoped passive discovery of likely AI endpoints, agent signals, and AI inputs
-- refuse: when the request is unrelated or asks for an unsupported capability
-You must never produce shell commands, URLs, request bodies, credentials, exploit payloads, scripts, or tool arguments.
-The target is supplied separately by Phobos and cannot be changed by you.
-Return exactly one JSON object with exactly these two keys:
-{"action":"web_recon","reason":"brief explanation"}
+_MODULE_SUMMARY = "\n".join(
+    f"- {item.id}: {item.name} — {item.description}"
+    for item in module_index().values()
+)
+
+SYSTEM_PROMPT = f"""You are the reasoning component of Phobos, a general web-security scanner for web applications that contain AI functionality.
+
+Your job is to plan which existing Phobos security modules should investigate a target. The scanner is broad: it can assess normal web vulnerabilities as well as AI-specific vulnerabilities.
+
+You may ONLY select modules from this catalog:
+{_MODULE_SUMMARY}
+
+Rules:
+- The explicit target and scope are controlled by Phobos, not by you.
+- Never produce shell commands, arbitrary URLs, raw request bodies, credentials, exploit scripts, or custom tool arguments.
+- Do not claim that a vulnerability exists merely because a module is relevant.
+- Prefer broad coverage first, then prioritize modules using discovered evidence.
+- Nmap is optional supporting reconnaissance, not the core of Phobos.
+
+Return exactly one JSON object:
+{{"action":"plan_scan","modules":["web.headers"],"reason":"brief prioritization rationale"}}
 """
 
 
@@ -73,25 +89,10 @@ def _extract_text(payload: dict[str, Any]) -> str:
     direct = payload.get("output_text")
     if isinstance(direct, str) and direct.strip():
         return direct.strip()
-    pieces: list[str] = []
-    output = payload.get("output")
-    if isinstance(output, list):
-        for item in output:
-            if not isinstance(item, dict):
-                continue
-            content_items = item.get("content")
-            if not isinstance(content_items, list):
-                continue
-            for content in content_items:
-                if isinstance(content, dict) and isinstance(content.get("text"), str):
-                    pieces.append(content["text"])
-    text = "\n".join(pieces).strip()
-    if text:
-        return text
     raise AIError("AI response contained no text")
 
 
-def _parse_decision(text: str) -> dict[str, str]:
+def _parse_decision(text: str) -> dict[str, Any]:
     cleaned = text.strip()
     if cleaned.startswith("```"):
         cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
@@ -100,21 +101,27 @@ def _parse_decision(text: str) -> dict[str, str]:
         value = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise AIError("AI returned invalid JSON") from exc
-    if not isinstance(value, dict):
-        raise AIError("AI returned an invalid decision")
-    if set(value) != REQUIRED_DECISION_KEYS:
-        raise AIError("AI decision must contain exactly action and reason")
-    action = value["action"]
-    reason = value["reason"]
-    if not isinstance(action, str) or not isinstance(reason, str):
+    if not isinstance(value, dict) or set(value) != REQUIRED_DECISION_KEYS:
+        raise AIError("AI decision must contain exactly action, modules, and reason")
+    action = value.get("action")
+    modules = value.get("modules")
+    reason = value.get("reason")
+    if action not in SUPPORTED_ACTIONS or not isinstance(modules, list) or not isinstance(reason, str):
         raise AIError("AI decision has invalid fields")
-    action = action.strip()
-    reason = reason.strip()
-    if action not in SUPPORTED_ACTIONS:
-        raise AIError("AI requested an unsupported action")
-    if not reason:
+    if action == "refuse":
+        return {"action": "refuse", "modules": [], "reason": reason[:MAX_REASON_CHARS]}
+    if not modules or len(modules) > MAX_MODULES:
+        raise AIError("AI selected an invalid number of modules")
+    catalog = module_index()
+    selected: list[str] = []
+    for item in modules:
+        if not isinstance(item, str) or item not in catalog:
+            raise AIError(f"AI selected unsupported module: {item}")
+        if item not in selected:
+            selected.append(item)
+    if not reason.strip():
         raise AIError("AI decision reason must not be empty")
-    return {"action": action, "reason": reason[:MAX_REASON_CHARS]}
+    return {"action": action, "modules": selected, "reason": reason.strip()[:MAX_REASON_CHARS]}
 
 
 class VeniceClient:
@@ -125,20 +132,20 @@ class VeniceClient:
             raise AIError("AI timeout must be positive")
         self.config = config
 
-    def decide(self, request_text: str) -> dict[str, str]:
-        request_text = request_text.strip()
-        if not request_text:
-            raise AIError("request must not be empty")
-        if len(request_text) > MAX_REQUEST_CHARS:
-            raise AIError(f"request exceeds the {MAX_REQUEST_CHARS:,}-character limit")
+    def plan(self, context: str) -> dict[str, Any]:
+        context = context.strip()
+        if not context:
+            raise AIError("planning context must not be empty")
+        if len(context) > MAX_REQUEST_CHARS:
+            raise AIError(f"planning context exceeds the {MAX_REQUEST_CHARS:,}-character limit")
         body = {
             "model": self.config.model,
             "messages": [
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": request_text},
+                {"role": "user", "content": context},
             ],
             "temperature": 0.1,
-            "max_tokens": 200,
+            "max_tokens": 400,
             "stream": False,
         }
         encoded = json.dumps(body, separators=(",", ":")).encode("utf-8")
@@ -150,7 +157,7 @@ class VeniceClient:
                 "Authorization": f"Bearer {self.config.api_key}",
                 "Content-Type": "application/json",
                 "Accept": "application/json",
-                "User-Agent": "Phobos/0.2",
+                "User-Agent": "Phobos/0.4",
             },
         )
         try:
@@ -171,6 +178,9 @@ class VeniceClient:
             raise AIError("AI provider returned an invalid response")
         return _parse_decision(_extract_text(payload))
 
+    def decide(self, request_text: str) -> dict[str, Any]:
+        """Compatibility wrapper for older callers."""
+        return self.plan(request_text)
 
-# Backward-compatible name for integrations that imported the old class.
+
 OpenAIResponsesClient = VeniceClient
