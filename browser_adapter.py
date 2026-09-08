@@ -1,9 +1,10 @@
 """Scoped browser execution primitives for authorized Phobos assessments.
 
-The adapter is intentionally separate from assessment procedures. It provides a
-small browser surface with scope enforcement on every intercepted request,
-bounded request accounting, session isolation, and sanitized network evidence.
-Playwright is an optional dependency and is imported lazily.
+The browser adapter is the dynamic-Web boundary for Phobos. It provides a
+real browser/JavaScript runtime, scope enforcement on every intercepted
+request, bounded request accounting, session isolation, DOM/runtime evidence,
+and sanitized network observations. Playwright remains optional and is
+imported lazily.
 """
 from __future__ import annotations
 
@@ -15,6 +16,8 @@ from ai_testing import Observation
 from scope import ScopeError, ScopeValidator
 
 MAX_NETWORK_RECORDS = 2_000
+MAX_DOM_TEXT = 200_000
+MAX_SCRIPT_RESULT = 50_000
 
 
 class BrowserAdapterError(RuntimeError):
@@ -67,6 +70,36 @@ class NetworkRecord:
         )
 
 
+@dataclass(frozen=True, slots=True)
+class BrowserPageSnapshot:
+    """Bounded dynamic-page observations after JavaScript execution."""
+
+    url: str
+    title: str
+    text: str
+    links: tuple[str, ...]
+    forms: tuple[dict[str, Any], ...]
+    scripts: tuple[str, ...]
+    storage_keys: tuple[str, ...]
+
+    def to_observations(self) -> tuple[Observation, ...]:
+        return (
+            Observation(
+                kind="browser_dom",
+                description=f"Rendered DOM observed at {_safe_url(self.url)}",
+                source="browser_adapter",
+                metadata={
+                    "url": _safe_url(self.url),
+                    "title": self.title[:500],
+                    "links": list(self.links),
+                    "forms": list(self.forms),
+                    "scripts": list(self.scripts),
+                    "storage_keys": list(self.storage_keys),
+                },
+            ),
+        )
+
+
 class BrowserSession(Protocol):
     """Minimal browser contract consumed by assessment adapters."""
 
@@ -75,6 +108,8 @@ class BrowserSession(Protocol):
     def text(self) -> str: ...
     def fill(self, selector: str, value: str) -> None: ...
     def click(self, selector: str) -> None: ...
+    def snapshot(self) -> BrowserPageSnapshot: ...
+    def run_probe(self, script: str) -> Any: ...
     def network_observations(self) -> tuple[Observation, ...]: ...
     def close(self) -> None: ...
 
@@ -83,6 +118,11 @@ def _safe_url(url: str) -> str:
     """Remove query/fragment data so secrets are not written into evidence."""
     parts = urlsplit(url)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
+
+
+def _bounded_string(value: Any, *, limit: int) -> str:
+    text = str(value)
+    return text[:limit]
 
 
 class PlaywrightBrowserSession:
@@ -95,7 +135,7 @@ class PlaywrightBrowserSession:
         limits: BrowserLimits | None = None,
         headless: bool = True,
         browser_name: str = "chromium",
-        user_agent: str = "Phobos/0.3.2",
+        user_agent: str = "Phobos/0.4.1",
     ) -> None:
         self.scope = scope
         self.limits = limits or BrowserLimits()
@@ -213,7 +253,7 @@ class PlaywrightBrowserSession:
         return self._require_open().title()
 
     def text(self) -> str:
-        return self._require_open().locator("body").inner_text(timeout=self.limits.navigation_timeout_ms)
+        return self._require_open().locator("body").inner_text(timeout=self.limits.navigation_timeout_ms)[:MAX_DOM_TEXT]
 
     def fill(self, selector: str, value: str) -> None:
         if not selector.strip():
@@ -226,6 +266,66 @@ class PlaywrightBrowserSession:
             raise ValueError("selector must not be empty")
         self._require_open().locator(selector).click()
         self._check_blocked()
+
+    def snapshot(self) -> BrowserPageSnapshot:
+        page = self._require_open()
+        try:
+            payload = page.evaluate(
+                """
+                () => ({
+                    url: location.href,
+                    title: document.title || "",
+                    text: (document.body?.innerText || "").slice(0, 200000),
+                    links: Array.from(document.querySelectorAll('a[href]')).map(a => a.href),
+                    scripts: Array.from(document.querySelectorAll('script[src]')).map(s => s.src),
+                    forms: Array.from(document.forms).map(form => ({
+                        action: form.action || location.href,
+                        method: (form.method || 'GET').toUpperCase(),
+                        inputs: Array.from(form.elements).map(el => ({
+                            name: el.name || '',
+                            type: el.type || el.tagName.toLowerCase()
+                        })).filter(item => item.name)
+                    })),
+                    storage_keys: [
+                        ...Object.keys(window.localStorage || {}),
+                        ...Object.keys(window.sessionStorage || {})
+                    ].slice(0, 500)
+                })
+                """
+            )
+            self._check_blocked()
+        except Exception as exc:
+            raise BrowserAdapterError(f"dynamic DOM snapshot failed: {exc}") from exc
+
+        if not isinstance(payload, dict):
+            raise BrowserAdapterError("browser returned an invalid DOM snapshot")
+        return BrowserPageSnapshot(
+            url=str(payload.get("url") or page.url),
+            title=_bounded_string(payload.get("title", ""), limit=500),
+            text=_bounded_string(payload.get("text", ""), limit=MAX_DOM_TEXT),
+            links=tuple(str(item) for item in payload.get("links", ()) if item),
+            forms=tuple(item for item in payload.get("forms", ()) if isinstance(item, dict)),
+            scripts=tuple(str(item) for item in payload.get("scripts", ()) if item),
+            storage_keys=tuple(str(item) for item in payload.get("storage_keys", ()) if item),
+        )
+
+    def run_probe(self, script: str) -> Any:
+        """Run a bounded, caller-supplied browser probe in the target page.
+
+        The AI planner never receives this primitive directly. Security modules
+        provide fixed probe scripts and validate the returned data before using it.
+        """
+        if not script.strip():
+            raise ValueError("script must not be empty")
+        result = self._require_open().evaluate(script)
+        self._check_blocked()
+        if isinstance(result, str):
+            return result[:MAX_SCRIPT_RESULT]
+        if isinstance(result, (list, tuple)):
+            return result[:500]
+        if isinstance(result, dict):
+            return {str(k): v for k, v in list(result.items())[:500]}
+        return result
 
     def network_observations(self) -> tuple[Observation, ...]:
         return tuple(record.to_observation() for record in self._records)
