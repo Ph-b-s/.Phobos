@@ -4,270 +4,207 @@
 
 ### Web & AI Security Testing Framework
 
-**Discover the system. Map the trust boundaries. Test the attack path. Prove the evidence.**
+**Discover the system. Test the trust boundaries. Prove the attack path.**
 
 Phobos is an open-source framework for authorized security testing of modern web applications, APIs, AI assistants, AI agents, tools, and the relationships between them.
+
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![Status](https://img.shields.io/badge/status-early%20development-orange?style=flat-square)](#status)
+[![Web Security](https://img.shields.io/badge/focus-Web%20Security-blue?style=flat-square)](#focus)
+[![AI Security](https://img.shields.io/badge/focus-AI%20Security-red?style=flat-square)](#focus)
 
 </div>
 
 ---
 
-## Project status
+## Status
 
-Phobos is in early development. The current build is intentionally focused on the foundation required to test real targets rather than maintaining synthetic demonstration targets.
+Phobos is in early development. The current codebase provides bounded web reconnaissance, passive AI-surface discovery, JavaScript/API route discovery, a constrained AI planning layer, a reusable assessment procedure model, a bounded assessment engine, browser execution support, structured evidence handling, and an optional Nmap reconnaissance module.
 
-Implemented foundations include:
+The project is being prepared for its first real external security-testing work against authorized PortSwigger Web Security Academy labs.
 
-- strict target and scope validation
-- bounded HTTP reconnaissance
-- bounded TCP service discovery through Nmap
-- web pages, links, forms, inputs, and JavaScript discovery
-- passive API-route discovery from HTML and JavaScript
-- passive AI-surface discovery
-- a shared asset and relationship graph
-- structured evidence storage
-- reusable assessment procedures
-- a bounded assessment engine
-- browser and HTTP execution primitives
-- regression coverage for scope, discovery, graphing, and assessment logic
+There are no synthetic demo targets in the main project workflow. The objective is to make Phobos useful against real authorized targets rather than optimize the framework around a toy application.
 
-Synthetic vulnerable targets and demo runners are deliberately not part of the project path. Real authorized environments, especially PortSwigger Web Security Academy labs, are the intended validation targets.
+## Focus
 
-## Mission
+Phobos is primarily a **web + AI security** project.
 
-Modern security failures often cross multiple layers:
+Nmap is intentionally small:
 
 ```text
-Attacker-controlled input
-        ↓
-Web application
-        ↓
-API / stored data
-        ↓
-LLM context
-        ↓
-Model decision
-        ↓
-Tool / API call
-        ↓
-Authenticated state
-        ↓
-Security impact
+Web discovery       ─┐
+AI discovery         ├──> shared attack-surface graph
+Nmap (optional)     ─┘
 ```
 
-Phobos is designed to model that chain instead of treating web security and AI security as unrelated scanners.
+Nmap provides basic host/service context when requested. It does not become a separate scanner architecture, and its output is not treated as a vulnerability finding.
 
-The long-term pipeline is:
+The central security model remains:
 
 ```text
-Discover → Normalize → Connect → Probe → Validate → Correlate → Report
+attacker-controlled input
+        ↓
+application component
+        ↓
+AI / API / browser interaction
+        ↓
+trust boundary
+        ↓
+security-relevant behavior
+        ↓
+validated finding
 ```
-
-A finding should therefore explain an observed relationship, not merely match a suspicious string.
 
 ---
 
 # Architecture
 
-Phobos keeps a flat source layout while enforcing clear logical boundaries.
+The repository stays deliberately flat while the logical boundaries remain explicit:
 
 ```text
-                 Target + Scope
-                       |
-        +--------------+--------------+
-        |                             |
-        v                             v
- Network Discovery              Web Discovery
-      Nmap                    HTTP / Browser
-        |                             |
-        +--------------+--------------+
-                       v
-                Attack-Surface Graph
-                       |
-             +---------+---------+
-             |                   |
-             v                   v
-      AI Surface Discovery   Service Mapping
-             |                   |
-             +---------+---------+
-                       v
-              Assessment Procedure
-                       |
-                       v
-                Assessment Engine
-                       |
-                       v
-               Execution Adapter
-                       |
-                       v
-             Structured Observations
-                       |
-                       v
-                Evidence Correlation
-                       |
-                       v
-                   Finding
+CLI
+ │
+ ▼
+Configuration + Scope
+ │
+ ├───────────────┬────────────────┐
+ ▼               ▼                ▼
+Web Discovery  AI Discovery   Nmap Module
+ │               │                │
+ └───────────────┴────────────────┘
+                 ▼
+          Attack-Surface Graph
+                 │
+                 ▼
+        Assessment Procedures
+                 │
+                 ▼
+          Assessment Engine
+                 │
+                 ▼
+        HTTP / Browser Adapter
+                 │
+                 ▼
+       Structured Observations
+                 │
+                 ▼
+        Evidence Correlation
+                 │
+                 ▼
+             Findings
 ```
 
-The key design rule is that scanners do not own the final finding. They produce observations that become useful when connected to the unified attack-surface model.
+The important point is that discovery mechanisms produce information for one shared model. A web endpoint, a discovered JavaScript route, a likely AI surface, or an optional open port can all become context for later assessment.
 
-See [`RECON_ARCHITECTURE.md`](RECON_ARCHITECTURE.md) for the detailed reconnaissance design.
+## Discovery
 
----
-
-# Network discovery with Nmap
-
-Nmap is part of Phobos' reconnaissance foundation.
-
-Its purpose is not to turn Phobos into a generic port-scanning wrapper. It answers an upstream question:
-
-> What network services are exposed by the target host, and which of them should influence deeper application discovery?
-
-The current network primitive:
-
-```text
-Target URL / hostname
-        ↓
-      Scope
-        ↓
-     Nmap TCP
-  top 100 ports
-        ↓
-  normalized ports
-        ↓
-   attack graph
-```
-
-The execution path is deliberately bounded:
-
-- TCP connect scanning (`-sT`)
-- top 100 ports
-- open-port output only
-- XML output parsed into typed observations
-- `shell=False`
-- explicit timeout
-- target host derived from the supplied target URL
-- centralized scope validation
-
-An open port is **not automatically a vulnerability**. It is attack-surface information that can reveal another service, an HTTP listener, an administrative interface, or a useful relationship to application behavior.
-
-The next stages can later use these observations to guide service-specific discovery rather than blindly scanning everything.
-
----
-
-# Web discovery
-
-The crawler discovers:
+Web discovery currently covers:
 
 ```text
 pages
 links
 forms
 inputs
-JavaScript
-API routes
+JavaScript references
+API routes found in JavaScript
 query parameters
-AI-related signals
+likely AI endpoints
+provider / agent signals
+AI-oriented inputs
 ```
 
-The JavaScript discovery layer is passive. It extracts likely application routes from patterns such as browser `fetch()` calls, Axios requests, explicit HTTP-method calls, GraphQL endpoints, and conventional API paths.
+The crawler is bounded and all HTTP destinations remain subject to centralized scope enforcement.
 
-These routes are normalized into the same endpoint/input model as ordinary HTML-discovered resources.
+The optional Nmap module performs bounded TCP discovery and normalizes open ports into simple `port` assets. It is primarily useful as supporting context for the target host.
+
+## Assessment
+
+Assessment procedures are reusable investigations rather than hard-coded payload scripts.
+
+A procedure should define:
+
+```text
+prerequisites
+required observations
+safe probe
+expected evidence
+positive confirmation
+optional impact validation
+```
+
+The assessment engine executes only declared steps, limits execution and observations, validates adapter output, and separates state-changing validation from normal reconnaissance.
+
+## Evidence
+
+Phobos should distinguish:
+
+```text
+observation
+   ↓
+suspicion
+   ↓
+strong signal
+   ↓
+confirmed behavior
+```
+
+A suspicious response or matching string is not automatically a vulnerability. The goal is to retain enough evidence to reconstruct how input moved through the application and what security consequence followed.
 
 ---
 
-# AI surface discovery
+# First PortSwigger target
 
-AI discovery is deliberately conservative.
+The immediate development goal is one narrow, repeatable end-to-end test against an authorized PortSwigger lab.
 
-Phobos currently recognizes signals such as:
-
-```text
-chat / completion endpoints
-provider references
-agent / tool terminology
-AI-oriented form inputs
-```
-
-A signal means:
+The intended workflow is:
 
 ```text
-"this component may be interesting"
+1. Provide lab URL and scope
+2. Run web reconnaissance
+3. Optionally enrich with Nmap
+4. Build the shared attack-surface graph
+5. Identify the relevant vulnerability surface
+6. Select one assessment procedure
+7. Perform the smallest useful probe
+8. Capture structured evidence
+9. Confirm the vulnerability
+10. Produce a reproducible finding
 ```
 
-It does **not** mean:
-
-```text
-"a vulnerability was found"
-```
-
-The next architectural step is connecting those AI signals to actual application behavior and, where visible, to model-controlled tools and resources.
+Lab-specific URLs, payload strings, and quirks should remain test fixtures. The procedure itself should represent the vulnerability class.
 
 ---
 
-# Assessment model
+# CLI
 
-Phobos separates four concepts:
+### Web reconnaissance
 
-### Mechanism
-
-HTTP and browser adapters perform bounded actions and emit observations.
-
-### Procedure
-
-A vulnerability procedure defines what needs to be discovered, what must be observed, and what constitutes confirmation.
-
-### Orchestration
-
-The assessment engine executes only declared procedure steps and enforces execution, observation, and state-change limits.
-
-### Finding logic
-
-The analyzer correlates observations and decides whether evidence supports a suspected, strong, or confirmed result.
-
-For AI security, the objective is to demonstrate a relationship such as:
-
-```text
-untrusted content
-      ↓
-LLM context
-      ↓
-changed model behavior
-      ↓
-security-relevant action
+```bash
+phobos scan https://example.com --scope example.com
 ```
 
-rather than declaring victory because a model echoed a payload.
+### Web reconnaissance with optional Nmap enrichment
+
+```bash
+phobos scan https://example.com --scope example.com --nmap
+```
+
+### AI-assisted reconnaissance planning
+
+```bash
+export VENICE_API_KEY="YOUR_VENICE_API_KEY"
+
+phobos ai \
+  --target https://example.com \
+  --scope example.com \
+  "Map the application and identify likely AI attack surfaces."
+```
+
+The AI planner is currently constrained to predefined reconnaissance capabilities. It cannot change the target, execute shell commands, or construct arbitrary requests.
 
 ---
 
-# First real testing target: PortSwigger labs
-
-PortSwigger Web Security Academy is the first external benchmark environment for Phobos.
-
-The important distinction is that Phobos should learn the **vulnerability procedure**, not memorize a lab.
-
-For each target, the intended workflow is:
-
-```text
-1. Establish target + scope
-2. Discover exposed services
-3. Discover web application surface
-4. Build the unified graph
-5. Identify the relevant AI or web trust boundary
-6. Select the applicable procedure
-7. Establish a clean baseline
-8. Execute the smallest useful active probe
-9. Compare observations
-10. Confirm the behavior with evidence
-11. Record a reproducible finding
-```
-
-A lab-specific target, parameter, payload, or URL belongs in a regression fixture. The reusable procedure should describe the class of vulnerability.
-
----
-
-# Repository structure
+# Repository layout
 
 ```text
 .Phobos/
@@ -286,90 +223,81 @@ A lab-specific target, parameter, payload, or URL belongs in a regression fixtur
 ├── nmap_runner.py
 ├── request_manager.py
 ├── scope.py
-├── test_*.py
-├── RECON_ARCHITECTURE.md
+├── web_surface.py
+├── tests...
+├── pyproject.toml
 ├── ABOUT.md
-├── README.md
-└── pyproject.toml
+├── RECON_ARCHITECTURE.md
+└── README.md
 ```
 
-The layout is physically flat; the architecture is not.
+The flat physical layout is intentional. Strong interfaces matter more than folders at this stage.
 
 ---
 
-# CLI foundation
+# Installation
 
-Current commands are focused on controlled discovery and planning:
+Phobos requires Python 3.11+.
 
 ```bash
-phobos scan https://example.com --scope example.com
-phobos ai --target https://example.com --scope example.com "Map the application"
-phobos doctor
+git clone -b flat-structure https://github.com/Ph-b-s/.Phobos.git
+cd .Phobos
+
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install -e ".[dev]"
 ```
 
-Network discovery is currently exposed as a library primitive rather than pretending that the complete end-to-end assessment CLI is finished.
+For browser execution:
 
-The future command structure is intended to become:
-
-```text
-phobos recon <target>
-    ├── network
-    ├── web
-    └── ai-surface
-
-phobos assess <target> --procedure <procedure>
-
-phobos report <scan-directory>
+```bash
+python -m pip install -e ".[browser]"
+playwright install chromium
 ```
 
-The important point is that `recon` should assemble observations into the attack-surface graph, while `assess` should execute a selected security procedure against that model.
+Verify the installation:
 
----
+```bash
+phobos --version
+phobos --help
+python -m pytest -q
+```
 
-# Safety
-
-Phobos is designed for authorized security testing.
-
-Every network capability should remain subject to explicit scope. Active validation should remain separate from passive discovery, and state-changing actions should require explicit authorization.
-
-The project should become more powerful by becoming more structured and evidence-driven, not by removing those boundaries.
+Nmap is an external system dependency and should be installed separately on systems where the optional module is used.
 
 ---
 
 # Roadmap
 
-## Phase I — Reconnaissance foundation
+## Foundation
 
-- [x] CLI foundation
+- [x] CLI
 - [x] configuration validation
 - [x] centralized scope enforcement
 - [x] bounded HTTP request manager
-- [x] network discovery primitive
-- [x] normalized Nmap port observations
-- [x] HTML reconnaissance
+- [x] bounded web crawler
 - [x] forms / inputs / endpoints / JavaScript discovery
-- [x] passive API-route discovery
 - [x] passive AI-surface discovery
-- [x] unified asset model
-- [x] execution graph
-- [x] structured evidence storage
+- [x] JavaScript/API route discovery
+- [x] shared attack-surface graph
+- [x] evidence storage
+- [x] optional Nmap reconnaissance module
+- [x] automated tests / CI configuration
 
-## Phase II — Real-target assessment foundation
+## First real assessments
 
-- [x] reusable assessment procedure model
-- [x] bounded assessment engine
-- [x] browser/session execution primitive
-- [x] evidence correlation
-- [x] confidence states
-- [ ] generic authenticated-session handling
-- [ ] structured tool/API observation
-- [ ] unified network + web graph integration
-- [ ] assessment CLI
+- [ ] PortSwigger target integration workflow
+- [ ] reusable first vulnerability procedure
+- [ ] assessment CLI command
+- [ ] authenticated session handling for real targets
+- [ ] richer request/response observations
+- [ ] reproducible finding output
 
-## Phase III — AI security procedures
+## AI security
 
 - [ ] direct prompt injection
-- [ ] indirect prompt injection
+- [ ] indirect prompt injection variants
 - [ ] sensitive information disclosure
 - [ ] system-prompt exposure
 - [ ] excessive agency
@@ -377,22 +305,19 @@ The project should become more powerful by becoming more structured and evidence
 - [ ] insecure output handling
 - [ ] retrieval/context poisoning
 - [ ] cross-user context isolation
-- [ ] multi-step AI attack-chain correlation
+- [ ] multi-step attack-chain correlation
 
-## Phase IV — Benchmarking
+## Later
 
-- [ ] first PortSwigger AI-security lab
-- [ ] additional PortSwigger lab regression fixtures
-- [ ] false-positive benchmark suite
-- [ ] repeatability scoring
-- [ ] evidence-quality scoring
-- [ ] detection coverage metrics
+- [ ] authentication-aware crawling
+- [ ] agent → tool → resource graphing
+- [ ] trust-boundary detection
+- [ ] cross-component attack-path construction
+- [ ] PortSwigger regression suite
+- [ ] reporting / SARIF / CI integration
 
-## Phase V — Reporting
+---
 
-- [ ] reproducible attack traces
-- [ ] rich vulnerability reports
-- [ ] attack-path visualization
-- [ ] machine-readable findings
-- [ ] SARIF export
-- [ ] CI/CD integration
+# Safety
+
+Phobos is designed for authorized security research, learning, and defensive engineering. Active testing should only be performed against targets for which testing is permitted.
