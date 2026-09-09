@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping
 
 from graph import Graph
 from knowledge_store import KnowledgeStore
@@ -106,6 +106,7 @@ def execute_plan(
     metadata: dict[str, Any] | None = None,
     knowledge: KnowledgeStore | None = None,
     graph: Graph | None = None,
+    capabilities: Mapping[str, Any] | None = None,
 ) -> ScanResult:
     """Execute a plan through the production module runner."""
     plan = validate_plan(plan)
@@ -129,6 +130,7 @@ def execute_plan(
             **(metadata or {}),
         },
         assets=assets,
+        capabilities=capabilities,
     )
     return ScanResult(
         target=target,
