@@ -56,6 +56,13 @@ def test_parse_decision_handles_markdown_json() -> None:
     assert result["modules"] == ["web.xss"]
 
 
+def test_parse_decision_handles_json_wrapped_in_text() -> None:
+    result = ai._parse_decision(
+        'Here is the plan:\n{"action":"plan_scan","modules":["web.xss"],"reason":"test"}'
+    )
+    assert result["modules"] == ["web.xss"]
+
+
 def test_target_host_accepts_web_path() -> None:
     assert target_host("https://example.com/admin/lab?id=1") == "example.com"
 
@@ -107,11 +114,35 @@ def test_nmap_runner_blocks_out_of_scope_host() -> None:
         run_top_ports_scan("evil-example.com", scope, execute=False)
 
 
-def test_ai_config_defaults_to_venice_uncensored(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("VENICE_API_KEY", "test-key")
+def test_ai_config_defaults_to_local_mistral(monkeypatch: pytest.MonkeyPatch) -> None:
+    for name in (
+        "PHOBOS_AI_PROVIDER",
+        "PHOBOS_AI_URL",
+        "PHOBOS_AI_MODEL",
+        "PHOBOS_AI_TIMEOUT",
+        "PHOBOS_AI_AUTOSTART",
+        "PHOBOS_AI_AUTO_PULL",
+    ):
+        monkeypatch.delenv(name, raising=False)
     config = ai.AIConfig.from_env()
-    assert config.model == "venice-uncensored"
-    assert config.base_url == "https://api.venice.ai/api/v1/chat/completions"
+    assert config.model == ai.MODEL_NAME
+    assert config.model == "mistral-small3.2:24b-instruct-2506-q4_K_M"
+    assert config.base_url == "http://127.0.0.1:11434/api/chat"
+    assert config.auto_start_runtime is True
+    assert config.auto_pull_model is True
+
+
+def test_ai_config_rejects_remote_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("PHOBOS_AI_URL", "https://example.com/api/chat")
+    with pytest.raises(ai.AIError, match="local HTTP endpoint"):
+        ai.AIConfig.from_env()
+
+
+def test_response_text_supports_ollama_shape() -> None:
+    payload = {
+        "message": {"content": json.dumps({"action": "refuse", "modules": [], "reason": "no"})}
+    }
+    assert ai._extract_text(payload).startswith("{")
 
 
 def test_response_text_supports_openai_compatible_shape() -> None:
@@ -121,51 +152,81 @@ def test_response_text_supports_openai_compatible_shape() -> None:
     assert ai._extract_text(payload).startswith("{")
 
 
-def test_venice_client_builds_module_plan_request(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_local_mistral_client_builds_ollama_request(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, object] = {}
 
-    class FakeResponse:
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def read(self, size):
-            return json.dumps({
-                "choices": [{"message": {"content": '{"action":"plan_scan","modules":["web.auth"],"reason":"test"}'}}]
-            }).encode("utf-8")
+    def fake_json(url, **kwargs):
+        captured.setdefault("calls", []).append((url, kwargs))
+        if url.endswith("/api/version"):
+            return {"version": "0.12.0"}
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": ai.MODEL_NAME}]}
+        if url.endswith("/api/chat"):
+            return {
+                "message": {
+                    "content": '{"action":"plan_scan","modules":["web.auth"],"reason":"test"}'
+                }
+            }
+        raise AssertionError(url)
 
-    def fake_urlopen(request, timeout):
-        captured["request"] = request
-        captured["timeout"] = timeout
-        return FakeResponse()
-
-    monkeypatch.setattr(ai, "urlopen", fake_urlopen)
-    client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
+    monkeypatch.setattr(ai, "_http_json", fake_json)
+    client = ai.LocalMistralClient(ai.AIConfig())
     decision = client.plan("map this application")
-    request = captured["request"]
-    payload = json.loads(request.data.decode("utf-8"))
     assert decision["action"] == "plan_scan"
     assert decision["modules"] == ["web.auth"]
-    assert payload["model"] == "venice-uncensored"
-    assert captured["timeout"] == 30.0
+    urls = [url for url, _ in captured["calls"]]
+    assert urls == [
+        ai.DEFAULT_HEALTH_URL,
+        ai.DEFAULT_TAGS_URL,
+        ai.DEFAULT_BASE_URL,
+    ]
+    chat_kwargs = captured["calls"][2][1]
+    assert chat_kwargs["method"] == "POST"
+    assert chat_kwargs["body"]["model"] == ai.MODEL_NAME
+    assert chat_kwargs["body"]["format"] == "json"
+    assert chat_kwargs["body"]["options"]["temperature"] == 0.1
 
 
-def test_ai_client_rejects_oversized_response(monkeypatch: pytest.MonkeyPatch) -> None:
-    class FakeResponse:
-        def __enter__(self):
-            return self
-        def __exit__(self, *args):
-            return False
-        def read(self, size):
-            return b"x" * (ai.MAX_RESPONSE_BYTES + 1)
+def test_local_mistral_client_can_start_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls = {"health": 0, "start": 0}
 
-    monkeypatch.setattr(ai, "urlopen", lambda request, timeout: FakeResponse())
-    client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
-    with pytest.raises(ai.AIError, match="size limit"):
+    def fake_json(url, **kwargs):
+        if url.endswith("/api/version"):
+            calls["health"] += 1
+            if calls["health"] < 2:
+                raise ai.AIError("not running")
+            return {"version": "0.12.0"}
+        if url.endswith("/api/tags"):
+            return {"models": [{"name": ai.MODEL_NAME}]}
+        if url.endswith("/api/chat"):
+            return {"message": {"content": '{"action":"refuse","modules":[],"reason":"no"}'}}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(ai, "_http_json", fake_json)
+    monkeypatch.setattr(ai, "_start_ollama", lambda: calls.__setitem__("start", calls["start"] + 1) or SimpleNamespace())
+    monkeypatch.setattr(ai, "_wait_for_runtime", lambda timeout: None)
+    client = ai.LocalMistralClient(ai.AIConfig())
+    result = client.plan("test")
+    assert result["action"] == "refuse"
+    assert calls["start"] == 1
+
+
+def test_local_mistral_client_requires_model_when_auto_pull_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fake_json(url, **kwargs):
+        if url.endswith("/api/version"):
+            return {"version": "0.12.0"}
+        if url.endswith("/api/tags"):
+            return {"models": []}
+        raise AssertionError(url)
+
+    monkeypatch.setattr(ai, "_http_json", fake_json)
+    config = ai.AIConfig(auto_pull_model=False)
+    client = ai.LocalMistralClient(config)
+    with pytest.raises(ai.AIError, match="not installed"):
         client.plan("test")
 
 
 def test_ai_client_rejects_oversized_request() -> None:
-    client = ai.VeniceClient(ai.AIConfig(api_key="secret"))
-    with pytest.raises(ai.AIError, match="8,000-character limit"):
+    client = ai.LocalMistralClient(ai.AIConfig())
+    with pytest.raises(ai.AIError, match="24,000-character limit"):
         client.plan("x" * (ai.MAX_REQUEST_CHARS + 1))
