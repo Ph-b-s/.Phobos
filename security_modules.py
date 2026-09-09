@@ -30,12 +30,23 @@ class ModuleContext:
     assets: tuple[Asset, ...] = ()
     knowledge: KnowledgeStore | None = None
     graph: Graph | None = None
+    browser: Any | None = None
+    interactor: Any | None = None
+    accounts: Any | None = None
+    workflow: Any | None = None
+    applications: tuple[Any, ...] = ()
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def store(self) -> KnowledgeStore:
         if self.knowledge is None:
             raise RuntimeError("module context has no shared knowledge store")
         return self.knowledge
+
+    def require(self, capability: str) -> Any:
+        value = getattr(self, capability, None)
+        if value is None:
+            raise RuntimeError(f"module requires unavailable capability: {capability}")
+        return value
 
 
 class SecurityModule(Protocol):
@@ -64,7 +75,6 @@ class ModuleSpec:
 
 
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
-    # Web
     ModuleSpec("web.headers", "Security headers", "Check response security headers and policy gaps.", ModuleDomain.WEB),
     ModuleSpec("web.cookies", "Cookie security", "Check Secure, HttpOnly, SameSite, scope, and session-cookie behavior.", ModuleDomain.WEB),
     ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB),
@@ -98,7 +108,6 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.client_javascript", "Client-side JavaScript", "Inspect and test browser-side JavaScript routes, sinks, and application behavior.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.api", "API security", "Test discovered HTTP APIs, including authorization, input validation, and state transitions.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.nmap", "Nmap security module", "Optional Nmap-backed service and web-facing vulnerability checks after web/AI testing.", ModuleDomain.WEB, stage=ModuleStage.SUPPLEMENTAL, active=True, tool="nmap"),
-    # AI
     ModuleSpec("ai.prompt_injection", "Prompt injection", "Test direct prompt-injection paths into model instructions.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.indirect_prompt_injection", "Indirect prompt injection", "Test untrusted external content that can influence model instructions.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.system_prompt", "System prompt leakage", "Test whether protected system instructions can be extracted or manipulated.", ModuleDomain.AI, active=True),
@@ -113,7 +122,6 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("ai.multi_agent", "Multi-agent security", "Test trust and authorization boundaries between cooperating agents.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.goal_hijacking", "Goal hijacking", "Test whether untrusted inputs can redirect an agent's intended objective.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.context_manipulation", "Context manipulation", "Test memory and contextual state for attacker-controlled influence.", ModuleDomain.AI, active=True),
-    # Cross-layer
     ModuleSpec("cross_layer.web_to_ai", "Web to AI flow", "Correlate attacker-controlled Web inputs with downstream AI context or decisions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
     ModuleSpec("cross_layer.ai_to_web", "AI to Web flow", "Correlate AI output or decisions with downstream Web/backend sinks.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
     ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether user authorization is preserved when AI functionality performs actions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
@@ -133,5 +141,4 @@ def module_index() -> dict[str, ModuleSpec]:
 
 
 def executable_module_ids(registry: Any | None = None) -> frozenset[str]:
-    """Return registered implementations, not planned catalog entries."""
     return registry.ids() if registry is not None else frozenset()
