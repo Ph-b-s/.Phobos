@@ -6,10 +6,13 @@ import json
 import sys
 from urllib.parse import urlparse
 
+from account_manager import AccountManager
 from ai import AIConfig, AIError, LocalMistralClient
 from browser_adapter import BrowserAdapterError, BrowserLimits, PlaywrightBrowserSession
+from browser_interaction import BrowserInteractor
 from config import DEFAULT_USER_AGENT, PHOBOS_VERSION, ScanConfig
 from crawler import ReconCrawler
+from cross_application import discover_related_applications, merge_applications_into_graph
 from cross_layer import AttackPath, analyze_cross_layer, correlate_attack_paths
 from evidence import EvidenceStore
 from graph import Graph
@@ -19,6 +22,7 @@ from request_manager import RequestError, RequestManager
 from scanner import ModuleSelection, ScanPlan, default_module_selection, execute_plan, merge_module_selections, validate_plan
 from security_modules import module_index
 from scope import ScopeValidator
+from workflow_engine import WorkflowEngine, register_standard_actions
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -126,7 +130,6 @@ def _attack_path_dict(path: AttackPath) -> dict:
 
 
 def _seed_recon_observations(store: KnowledgeStore, assets: tuple[Asset, ...], recon) -> None:
-    """Bridge passive discovery into the common knowledge state without creating findings."""
     store.add_assets(assets)
     for asset in assets:
         if asset.type in {AssetType.ENDPOINT, AssetType.API, AssetType.FORM, AssetType.INPUT, AssetType.JAVASCRIPT, AssetType.PAGE}:
@@ -171,11 +174,33 @@ def run_scan(args: argparse.Namespace) -> int:
             graph.add_edge(source=website.id, target=page.id, relationship="hosts")
         assets = (website, *recon.assets)
         initial_paths = correlate_attack_paths(graph)
+        related = discover_related_applications(
+            config.target,
+            links=tuple(asset.url for asset in assets if asset.url),
+            pages=tuple({"url": asset.url, "text": asset.name} for asset in assets if asset.url),
+        )
+        supporting_assets = merge_applications_into_graph(graph, website.id, related)
+        if supporting_assets:
+            assets = (*assets, *supporting_assets)
         context = json.dumps({"target": config.target, "assets": [a.to_dict() for a in assets[:500]],
                               "cross_layer_attack_paths": [_attack_path_dict(p) for p in initial_paths[:100]],
+                              "related_applications": [item.to_dict() for item in related[:100]],
                               "browser_enabled": args.browser}, ensure_ascii=False)
         plan = _build_plan(args, context)
-    except (RequestError, AIError, BrowserAdapterError, ValueError) as exc:
+
+        knowledge = KnowledgeStore()
+        _seed_recon_observations(knowledge, assets, recon)
+        capabilities: dict[str, object] = {"applications": related}
+        if browser is not None:
+            capabilities["browser"] = browser
+            capabilities["interactor"] = BrowserInteractor(browser)
+            capabilities["accounts"] = AccountManager()
+            capabilities["workflow"] = register_standard_actions(WorkflowEngine())
+        scan = execute_plan(config.target, assets, plan, knowledge=knowledge,
+                            metadata={"browser_enabled": args.browser}, graph=graph,
+                            capabilities=capabilities)
+        analysis = analyze_cross_layer(graph, scan.knowledge)
+    except (RequestError, AIError, BrowserAdapterError, ValueError, RuntimeError, TypeError) as exc:
         output.write_json("scan.json", {"schema_version": "1.0", "target": config.target, "status": "failed", "error": str(exc)})
         output.write_json("graph.json", graph.to_dict())
         print(f"✗ Scan stopped: {exc}", file=sys.stderr)
@@ -184,25 +209,15 @@ def run_scan(args: argparse.Namespace) -> int:
         if browser is not None:
             browser.close()
 
-    knowledge = KnowledgeStore()
-    _seed_recon_observations(knowledge, assets, recon)
-    try:
-        scan = execute_plan(config.target, assets, plan, knowledge=knowledge,
-                            metadata={"browser_enabled": args.browser}, graph=graph)
-        analysis = analyze_cross_layer(graph, scan.knowledge)
-    except (RuntimeError, ValueError, TypeError) as exc:
-        output.write_json("scan.json", {"schema_version": "1.0", "target": config.target, "status": "failed", "error": str(exc)})
-        output.write_json("graph.json", graph.to_dict())
-        print(f"✗ Module execution stopped: {exc}", file=sys.stderr)
-        return 2
-
     output.write_json("scan.json", {"schema_version": "1.0", "target": config.target,
         "scopes": list(scope.allowed_domains), "status": "assessment_complete",
         "summary": {"pages": len(recon.pages), "forms": len(recon.forms), "inputs": len(recon.inputs),
                     "endpoints": len(recon.endpoints), "javascript_files": len(recon.javascript),
                     "ai_surfaces": len(recon.ai_surfaces), "browser_observations": len(recon.browser_observations),
-                    "cross_layer_paths": len(analysis.attack_paths), "cross_layer_correlations": len(analysis.correlations),
-                    "modules_completed": len(scan.modules_run), "module_errors": len(scan.errors), "findings": len(scan.findings)},
+                    "cross_application_candidates": len(related), "cross_layer_paths": len(analysis.attack_paths),
+                    "cross_layer_correlations": len(analysis.correlations), "modules_completed": len(scan.modules_run),
+                    "module_unimplemented": sum(item.status == "unimplemented" for item in scan.module_run.executions),
+                    "findings": len(scan.findings)},
         "plan": {"source": plan.source, "modules": [item.module_id for item in plan.selections]}})
     output.write_json("assets.json", [asset.to_dict() for asset in scan.assets])
     output.write_json("graph.json", graph.to_dict())
@@ -210,6 +225,7 @@ def run_scan(args: argparse.Namespace) -> int:
     output.write_json("module_run.json", scan.module_run.to_dict())
     output.write_json("knowledge.json", scan.knowledge.to_dict())
     output.write_json("findings.json", [finding.to_dict() for finding in scan.findings])
+    output.write_json("cross_applications.json", [item.to_dict() for item in related])
     output.write_json("browser_observations.json", [{"kind": getattr(item, "kind", ""),
         "description": getattr(item, "description", ""), "source": getattr(item, "source", ""),
         "metadata": getattr(item, "metadata", {})} for item in recon.browser_observations])
@@ -221,14 +237,13 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"✓ {len(recon.ai_surfaces)} AI signals discovered")
     if args.browser:
         print(f"✓ {len(recon.browser_observations)} browser observations captured")
+    print(f"✓ {len(related)} cross-application candidates discovered")
     print(f"✓ {len(analysis.attack_paths)} cross-layer attack paths correlated")
     print(f"✓ {len(analysis.correlations)} cross-layer evidence correlations")
     print(f"✓ {len(scan.modules_run)} modules executed")
-    if scan.errors:
-        print(f"⚠ {len(scan.errors)} modules are not implemented yet")
     print(f"✓ {len(scan.findings)} findings recorded")
     print(f"\nResults saved to {config.output_dir}")
-    return 0 if not scan.errors else 1
+    return 0
 
 
 def run_ai(args: argparse.Namespace) -> int:
