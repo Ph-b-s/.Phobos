@@ -6,7 +6,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 
-PHOBOS_VERSION = "0.6.0"
+PHOBOS_VERSION = "0.7.0"
 DEFAULT_USER_AGENT = f"Phobos/{PHOBOS_VERSION}"
 
 
@@ -64,13 +64,6 @@ class ScanConfig:
         user_agent: str = DEFAULT_USER_AGENT,
         allow_private_targets: bool = False,
     ) -> "ScanConfig":
-        return cls(
-            target=target,
-            scopes=scopes,
-            output_dir=Path(output_dir),
-            timeout=timeout,
-            max_pages=max_pages,
-            max_discovered_urls=max_discovered_urls,
-            user_agent=user_agent,
-            allow_private_targets=allow_private_targets,
-        )
+        return cls(target=target, scopes=scopes, output_dir=Path(output_dir), timeout=timeout,
+                   max_pages=max_pages, max_discovered_urls=max_discovered_urls,
+                   user_agent=user_agent, allow_private_targets=allow_private_targets)
