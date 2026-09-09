@@ -30,13 +30,7 @@ class InteractionResult:
     data: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "action": self.action,
-            "url": self.url,
-            "success": self.success,
-            "detail": self.detail,
-            "data": self.data or {},
-        }
+        return {"action": self.action, "url": self.url, "success": self.success, "detail": self.detail, "data": self.data or {}}
 
 
 class BrowserInteractor:
@@ -75,6 +69,12 @@ class BrowserInteractor:
         except BrowserAdapterError as exc:
             raise BrowserInteractionError(str(exc)) from exc
 
+    def snapshot_dict(self) -> dict[str, Any]:
+        snapshot = self.snapshot()
+        return {"url": snapshot.url, "title": snapshot.title, "text": snapshot.text,
+                "links": list(snapshot.links), "forms": list(snapshot.forms),
+                "scripts": list(snapshot.scripts), "storage_keys": list(snapshot.storage_keys)}
+
     def find_text(self, needles: Iterable[str]) -> tuple[str, ...]:
         text = self.session.text()
         lowered = text.casefold()
@@ -94,10 +94,8 @@ class BrowserInteractor:
             return ()
         result: list[str] = []
         for link in snapshot.links:
-            lowered = link.casefold()
-            if any(keyword in lowered for keyword in lowered_keywords):
-                if link not in result:
-                    result.append(link)
+            if any(keyword in link.casefold() for keyword in lowered_keywords) and link not in result:
+                result.append(link)
             if len(result) >= MAX_TEXT_MATCHES:
                 break
         return tuple(result)
