@@ -7,7 +7,7 @@ from typing import Any, Iterable
 from graph import Graph
 from knowledge_store import KnowledgeStore
 from models import Asset, Finding
-from module_runner import ModuleRegistry, ModuleRunner, default_module_registry
+from module_runner import ModuleRegistry, ModuleRun, ModuleRunner, default_module_registry
 from security_modules import ModuleStage, module_index
 
 
@@ -31,6 +31,7 @@ class ScanResult:
     modules_run: tuple[str, ...]
     errors: tuple[str, ...] = ()
     knowledge: KnowledgeStore | None = None
+    module_run: ModuleRun | None = None
 
 
 def default_module_selection(*, include_nmap: bool = False) -> ScanPlan:
@@ -117,8 +118,7 @@ def execute_plan(
         for module_id, handler in runners.items():
             registry.replace(module_id, handler)
 
-    runner = ModuleRunner(registry)
-    result = runner.run(
+    module_run = ModuleRunner(registry).run(
         target,
         (selection.module_id for selection in plan.selections),
         knowledge=knowledge,
@@ -132,9 +132,10 @@ def execute_plan(
     )
     return ScanResult(
         target=target,
-        assets=result.knowledge.assets,
-        findings=result.findings,
-        modules_run=tuple(item.module_id for item in result.executions if item.status == "completed"),
-        errors=result.errors,
-        knowledge=result.knowledge,
+        assets=module_run.knowledge.assets,
+        findings=module_run.findings,
+        modules_run=tuple(item.module_id for item in module_run.executions if item.status == "completed"),
+        errors=module_run.errors,
+        knowledge=module_run.knowledge,
+        module_run=module_run,
     )
