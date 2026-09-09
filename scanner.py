@@ -56,9 +56,9 @@ def merge_module_selections(base: ScanPlan, additions: Iterable[ModuleSelection]
     combined = list(base.selections)
     seen = {item.module_id for item in combined}
     for selection in additions:
+        if selection.module_id not in catalog:
+            raise ValueError(f"unknown security module: {selection.module_id}")
         if selection.module_id not in seen:
-            if selection.module_id not in catalog:
-                raise ValueError(f"unknown security module: {selection.module_id}")
             combined.append(selection)
             seen.add(selection.module_id)
     stage_order = {ModuleStage.WEB_AI: 0, ModuleStage.FOLLOW_UP: 1, ModuleStage.SUPPLEMENTAL: 2}
@@ -106,11 +106,7 @@ def execute_plan(
     knowledge: KnowledgeStore | None = None,
     graph: Graph | None = None,
 ) -> ScanResult:
-    """Execute a plan through the production module runner.
-
-    A mapping of handlers remains supported for extension/backward compatibility.
-    When omitted, Phobos uses its built-in registry.
-    """
+    """Execute a plan through the production module runner."""
     plan = validate_plan(plan)
     if isinstance(runners, ModuleRegistry):
         registry = runners
@@ -136,9 +132,9 @@ def execute_plan(
     )
     return ScanResult(
         target=target,
-        assets=tuple((knowledge or KnowledgeStore()).assets) if knowledge is not None else assets,
+        assets=result.knowledge.assets,
         findings=result.findings,
         modules_run=tuple(item.module_id for item in result.executions if item.status == "completed"),
         errors=result.errors,
-        knowledge=knowledge,
+        knowledge=result.knowledge,
     )
