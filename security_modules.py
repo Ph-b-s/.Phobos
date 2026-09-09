@@ -1,15 +1,11 @@
-"""Security-module contracts and the Phobos vulnerability catalog.
-
-Phobos keeps the repository physically flat while using explicit module domains
-and stages to keep responsibilities separate. All modules share a KnowledgeStore
-for normalized observations, facts, and findings.
-"""
+"""Security-module contracts and the Phobos vulnerability catalog."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any, Protocol
 
+from graph import Graph
 from knowledge_store import KnowledgeStore
 from models import Asset, Finding
 
@@ -28,11 +24,12 @@ class ModuleStage(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ModuleContext:
-    """Shared context supplied to a module during one scan."""
+    """Shared state supplied to one module execution."""
 
     target: str
     assets: tuple[Asset, ...] = ()
     knowledge: KnowledgeStore | None = None
+    graph: Graph | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def store(self) -> KnowledgeStore:
@@ -47,7 +44,7 @@ class SecurityModule(Protocol):
     description: str
 
     def can_run(self, context: ModuleContext) -> bool: ...
-    def run(self, context: ModuleContext) -> tuple[Finding, ...]: ...
+    def run(self, context: ModuleContext) -> Any: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,21 +61,6 @@ class ModuleSpec:
     @property
     def category(self) -> str:
         return self.domain.value
-
-
-@dataclass(frozen=True, slots=True)
-class PassiveSecurityModule:
-    id: str
-    name: str
-    description: str
-    domain: ModuleDomain
-    runner: Any
-
-    def can_run(self, context: ModuleContext) -> bool:
-        return True
-
-    def run(self, context: ModuleContext) -> tuple[Finding, ...]:
-        return tuple(self.runner(context))
 
 
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
@@ -132,13 +114,13 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("ai.goal_hijacking", "Goal hijacking", "Test whether untrusted inputs can redirect an agent's intended objective.", ModuleDomain.AI, active=True),
     ModuleSpec("ai.context_manipulation", "Context manipulation", "Test memory and contextual state for attacker-controlled influence.", ModuleDomain.AI, active=True),
     # Cross-layer
-    ModuleSpec("cross_layer.web_to_ai", "Web to AI flow", "Correlate attacker-controlled Web inputs with downstream AI context or decisions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.ai_to_web", "AI to Web flow", "Correlate AI output or decisions with downstream Web/backend sinks.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether user authorization is preserved when AI functionality performs actions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.data_flow", "Web/AI data-flow abuse", "Trace sensitive data across Web and AI contexts for unintended exposure or influence.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.control_flow", "Web/AI control-flow abuse", "Detect AI-mediated changes to an application's intended execution path.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.capability_escalation", "Capability escalation", "Detect cases where AI access expands attacker-controlled or user-level capability.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
-    ModuleSpec("cross_layer.attack_path", "Cross-layer attack paths", "Correlate Web and AI evidence into bounded multi-step attack paths for follow-up testing.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True),
+    ModuleSpec("cross_layer.web_to_ai", "Web to AI flow", "Correlate attacker-controlled Web inputs with downstream AI context or decisions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
+    ModuleSpec("cross_layer.ai_to_web", "AI to Web flow", "Correlate AI output or decisions with downstream Web/backend sinks.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
+    ModuleSpec("cross_layer.auth_boundary", "Web/AI auth boundary", "Test whether user authorization is preserved when AI functionality performs actions.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
+    ModuleSpec("cross_layer.data_flow", "Web/AI data-flow abuse", "Trace sensitive data across Web and AI contexts for unintended exposure or influence.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
+    ModuleSpec("cross_layer.control_flow", "Web/AI control-flow abuse", "Detect AI-mediated changes to an application's intended execution path.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
+    ModuleSpec("cross_layer.capability_escalation", "Capability escalation", "Detect cases where AI access expands attacker-controlled or user-level capability.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
+    ModuleSpec("cross_layer.attack_path", "Cross-layer attack paths", "Correlate Web and AI evidence into bounded multi-step attack paths for follow-up testing.", ModuleDomain.CROSS_LAYER, stage=ModuleStage.FOLLOW_UP, active=True, implemented=True),
 )
 
 
@@ -150,5 +132,6 @@ def module_index() -> dict[str, ModuleSpec]:
     return {item.id: item for item in MODULE_CATALOG}
 
 
-def executable_module_ids() -> frozenset[str]:
-    return frozenset()
+def executable_module_ids(registry: Any | None = None) -> frozenset[str]:
+    """Return registered implementations, not planned catalog entries."""
+    return registry.ids() if registry is not None else frozenset()
