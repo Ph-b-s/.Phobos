@@ -46,7 +46,7 @@ The AI inside Phobos is the **security brain**. It does not replace scanners and
                 WEB MODULES       AI MODULES      CROSS-LAYER
                     │                 │                 │
           HTTP + Browser JS      LLM / Agent       Web ↔ AI
-                    │                 │           attack-path
+                    │                 │           correlation
                     └─────────────────┼─────────────────┘
                                       ▼
                               EVIDENCE / FINDINGS
@@ -59,6 +59,52 @@ The AI inside Phobos is the **security brain**. It does not replace scanners and
 ```
 
 **Web and AI are targets. Modules are the capabilities used to search those targets for vulnerabilities.** Nmap is one Web module, not a third target and not a separate scanner architecture.
+
+---
+
+## Cross-layer correlation
+
+Cross-layer analysis is part of the core scan pipeline rather than an afterthought.
+
+```text
+Web + AI discovery
+       ↓
+Attack-surface graph
+       ↓
+Evidence correlation
+       ↓
+Web → AI / AI → Web paths
+       ↓
+Bounded follow-up candidates
+       ↓
+Security module runner
+```
+
+A graph path is **not automatically a vulnerability**. Phobos keeps correlation separate from confirmation: the correlation engine identifies plausible relationships, while security modules collect the evidence needed to support a finding.
+
+---
+
+## Security-module runner
+
+Phobos uses a registry-driven runner with explicit execution stages:
+
+```text
+WEB / AI ASSESSMENT
+        ↓
+FOLLOW-UP / CROSS-LAYER
+        ↓
+SUPPLEMENTAL (optional Nmap)
+```
+
+Each module receives the same shared knowledge state and can emit:
+
+- structured observations
+- findings
+- bounded follow-up candidates
+
+The runner rejects unknown modules, inactive modules, invalid stage ordering, oversized runs, and malformed module output. The AI can only select module IDs that exist in the catalog; actual execution requires a registered implementation.
+
+The current built-in implementations are the deterministic cross-layer correlation modules. Web and AI vulnerability procedures are added to the same runner as they become real.
 
 ---
 
@@ -177,11 +223,11 @@ Reconnaissance
       ↓
 Structured Web + AI context
       ↓
-Cross-layer attack-path candidates
+Cross-layer correlation
       ↓
 AI prioritization
       ↓
-Security module selection
+Security module runner
       ↓
 Controlled execution
       ↓
@@ -198,147 +244,39 @@ The AI may not change the target, bypass scope, execute arbitrary shell commands
 
 ---
 
-# Vulnerability module architecture
+# Development status
 
-The repository stays physically flat. Logical separation is provided by module contracts and stable IDs.
+### Foundation
 
-```text
-VULNERABILITY MODULES
-│
-├── WEB MODULES
-│   ├── web.headers
-│   ├── web.cookies
-│   ├── web.exposure
-│   ├── web.methods
-│   ├── web.auth
-│   ├── web.access_control
-│   ├── web.injection
-│   ├── web.xss
-│   ├── web.sqli / web.nosqli
-│   ├── web.ssrf
-│   ├── web.file_upload
-│   ├── web.api
-│   ├── web.client_javascript
-│   ├── web.browser_runtime
-│   └── web.nmap
-│
-├── AI MODULES
-│   ├── ai.prompt_injection
-│   ├── ai.indirect_prompt_injection
-│   ├── ai.data_disclosure
-│   ├── ai.tool_abuse
-│   ├── ai.excessive_agency
-│   └── ai.rag / ai.vector / ai.multi_agent / ...
-│
-└── CROSS-LAYER MODULES
-    ├── cross_layer.web_to_ai
-    ├── cross_layer.ai_to_web
-    ├── cross_layer.auth_boundary
-    ├── cross_layer.data_flow
-    ├── cross_layer.control_flow
-    ├── cross_layer.capability_escalation
-    └── cross_layer.attack_path
-```
+- [x] Central scope enforcement
+- [x] Bounded HTTP request manager
+- [x] Bounded static web crawler
+- [x] Optional real-browser JavaScript execution
+- [x] Rendered DOM / runtime network observations
+- [x] Forms / inputs / endpoint discovery
+- [x] JavaScript/API route discovery
+- [x] Passive AI-surface discovery
+- [x] Shared attack-surface graph
+- [x] Cross-layer attack-path correlation
+- [x] Cross-layer evidence correlation
+- [x] Registry-driven module runner
+- [x] Shared knowledge state across modules
+- [x] Evidence storage
+- [x] Security-module catalog
+- [x] AI planning layer
+- [x] Optional Nmap Web module
 
-Cross-layer modules are **correlation and attack-path capabilities**. They use evidence produced by Web and AI modules rather than becoming a second collection of scanners.
+### Current implementation target
 
----
-
-# Cross-layer model
-
-The central cross-layer concept is an attack path:
-
-```text
-WEB SOURCE
-   ↓
-attacker-controlled data
-   ↓
-AI CONTEXT / DECISION
-   ↓
-TOOL / API / OUTPUT
-   ↓
-WEB OR BACKEND SINK
-   ↓
-IMPACT
-```
-
-Phobos models these relationships in the attack-surface graph and produces bounded candidates for follow-up testing. A graph path is **not automatically a vulnerability**; confirmation still requires module evidence.
-
----
-
-# Architecture
-
-```text
-CLI
- │
- ▼
-Configuration + Scope
- │
- ▼
-Static HTTP Recon ────────┐
- │                        │
- ▼                        ▼
-Browser / JavaScript     Runtime Network
- │                        │
- └────────────┬───────────┘
-              ▼
-       Web + AI Attack Surface
-              │
-              ▼
-        Cross-Layer Graph
-              │
-              ▼
-        AI Planning / Reasoning
-              │
-              ▼
-       Security Module Plan
-              │
-      ┌───────┼────────┐
-      ▼       ▼        ▼
-     WEB      AI    CROSS-LAYER
-      │       │        │
-      └───────┼────────┘
-              ▼
- Controlled HTTP / Browser / Nmap execution
-              │
-              ▼
-      Structured observations
-              │
-              ▼
-       Evidence + correlation
-              │
-              ▼
-            Findings
-              │
-              ▼
-        AI reevaluation
-```
-
-Nmap is downstream of planning as a **Web security capability**. Browser/JavaScript execution is part of the Web layer, not a separate target.
-
----
-
-# Nmap's role
-
-Nmap belongs to the **Web module layer**.
-
-It is a tool Phobos can invoke to gather service-level security evidence and, as the module evolves, perform appropriate bounded vulnerability checks against the authorized target. An open port by itself is an observation, not a confirmed vulnerability.
-
-```text
-WEB TARGET
-    │
-    ▼
-AI selects useful testing capabilities
-    │
-    ├── HTTP / browser modules
-    └── web.nmap
-```
-
-Use it with:
-
-```bash
-phobos scan https://example.com --scope example.com --nmap
-```
+- [ ] Connect real Web vulnerability procedures to the runner
+- [ ] Connect real AI vulnerability procedures to the runner
+- [ ] Implement the first full PortSwigger vulnerability procedure
+- [ ] Improve request / response observations
+- [ ] Build authenticated-session handling
+- [ ] Implement AI-guided iterative module selection
+- [ ] Add confirmation/validation stages for high-value findings
+- [ ] Produce reproducible findings and reports
+- [ ] Build the Desktop App around the same engine
 
 ---
 
@@ -371,73 +309,3 @@ Finding confirmed
 Nmap is optional and should not be required for the first successful end-to-end vulnerability procedure.
 
 Lab-specific URLs, payloads, credentials, and quirks belong in test fixtures, not in generic module logic.
-
----
-
-# Development status
-
-### Foundation
-
-- [x] Central scope enforcement
-- [x] Bounded HTTP request manager
-- [x] Bounded static web crawler
-- [x] Optional real-browser JavaScript execution
-- [x] Rendered DOM / runtime network observations
-- [x] Forms / inputs / endpoint discovery
-- [x] JavaScript/API route discovery
-- [x] Passive AI-surface discovery
-- [x] Shared attack-surface graph
-- [x] Cross-layer attack-path correlation primitives
-- [x] Evidence storage
-- [x] Security-module catalog
-- [x] AI planning layer
-- [x] Optional Nmap Web module
-- [x] Synthetic demo infrastructure removed
-
-### Next implementation target
-
-- [ ] Connect real Web vulnerability modules to the module runner
-- [ ] Connect real AI vulnerability modules to the module runner
-- [ ] Implement the first full PortSwigger vulnerability procedure
-- [ ] Improve request / response observations
-- [ ] Build authenticated-session handling
-- [ ] Implement AI-guided iterative module selection
-- [ ] Expand cross-layer flow, trust, and capability correlation
-- [ ] Produce reproducible findings and reports
-
-### Web-security coverage
-
-- [ ] Authentication testing
-- [ ] Authorization / access-control testing
-- [ ] Injection testing
-- [ ] XSS and DOM testing
-- [ ] SQL / NoSQL injection testing
-- [ ] SSRF testing
-- [ ] File-upload testing
-- [ ] API security testing
-- [ ] Client-side JavaScript testing
-- [ ] Browser-driven testing
-- [ ] Configuration / exposure testing
-- [ ] Service-level checks through Nmap
-
-### AI-security coverage
-
-- [ ] Direct prompt injection
-- [ ] Indirect prompt injection
-- [ ] AI data disclosure
-- [ ] Tool abuse
-- [ ] Excessive agency
-- [ ] Retrieval / context attacks
-- [ ] Cross-user isolation
-- [ ] Multi-step AI attack chains
-
-### Cross-layer coverage
-
-- [ ] Web → AI trust-boundary testing
-- [ ] AI → Web action testing
-- [ ] AI → internal-service access testing
-- [ ] Web/AI authorization-boundary testing
-- [ ] Data-flow analysis
-- [ ] Control-flow analysis
-- [ ] Capability escalation analysis
-- [ ] Multi-step Web ↔ AI attack chains
