@@ -11,7 +11,6 @@ readme = "README.md"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
 browser = ["playwright==1.62.0"]
 
 [project.scripts]
@@ -39,7 +38,3 @@ py-modules = [
     "security_modules",
     "web_surface",
 ]
-
-[tool.pytest.ini_options]
-testpaths = ["."]
-python_files = ["test_*.py"]
