@@ -1,21 +1,19 @@
-"""Registry-driven, bounded execution for Phobos security modules.
-
-The runner is the execution boundary between planning/correlation and concrete
-security capabilities. Modules never choose arbitrary targets or transports;
-they receive a shared ModuleContext and return structured results.
-"""
+"""Registry-driven, bounded execution for Phobos security modules."""
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping
 
+from cross_layer import analyze_cross_layer
+from graph import Graph
 from knowledge_store import KnowledgeStore, SecurityObservation
 from models import Finding
-from security_modules import ModuleContext, ModuleSpec, SecurityModule, module_index
+from security_modules import ModuleContext, ModuleSpec, ModuleStage, SecurityModule, module_index
 
 MAX_MODULES_PER_RUN = 64
 MAX_RESULT_ITEMS_PER_MODULE = 256
 MAX_ERRORS_PER_RUN = 64
+MAX_FOLLOW_UPS_PER_RUN = 256
 
 
 @dataclass(frozen=True, slots=True)
@@ -81,12 +79,7 @@ ModuleHandler = Callable[[ModuleContext], ModuleResult | Iterable[SecurityObserv
 
 
 class ModuleRegistry:
-    """Explicit registry of executable module implementations.
-
-    Registration is intentionally separate from the vulnerability catalog:
-    catalog entries describe capabilities; the registry proves that an actual
-    implementation is available.
-    """
+    """Explicit registry of executable module implementations."""
 
     def __init__(self) -> None:
         self._handlers: dict[str, ModuleHandler] = {}
@@ -119,17 +112,41 @@ class ModuleRegistry:
         return module_id in self._handlers
 
 
+def default_module_registry() -> ModuleRegistry:
+    """Return the built-in registry.
+
+    Cross-layer modules are deterministic correlation modules and are the first
+    modules with a production implementation. Web/AI vulnerability modules are
+    registered later as concrete procedures are completed.
+    """
+    registry = ModuleRegistry()
+    for module_id in (
+        "cross_layer.web_to_ai",
+        "cross_layer.ai_to_web",
+        "cross_layer.auth_boundary",
+        "cross_layer.data_flow",
+        "cross_layer.control_flow",
+        "cross_layer.capability_escalation",
+        "cross_layer.attack_path",
+    ):
+        registry.register(module_id, _cross_layer_handler)
+    return registry
+
+
 @dataclass(frozen=True, slots=True)
 class ModuleRunner:
     """Execute a validated module plan against one shared knowledge store."""
 
     registry: ModuleRegistry
     max_modules: int = MAX_MODULES_PER_RUN
+    max_follow_ups: int = MAX_FOLLOW_UPS_PER_RUN
     stop_on_error: bool = False
 
     def __post_init__(self) -> None:
         if not 1 <= self.max_modules <= MAX_MODULES_PER_RUN:
             raise ValueError(f"max_modules must be between 1 and {MAX_MODULES_PER_RUN}")
+        if not 1 <= self.max_follow_ups <= MAX_FOLLOW_UPS_PER_RUN:
+            raise ValueError(f"max_follow_ups must be between 1 and {MAX_FOLLOW_UPS_PER_RUN}")
 
     def run(
         self,
@@ -137,6 +154,7 @@ class ModuleRunner:
         module_ids: Iterable[str],
         *,
         knowledge: KnowledgeStore | None = None,
+        graph: Graph | None = None,
         context_metadata: Mapping[str, Any] | None = None,
         assets: tuple[Any, ...] = (),
     ) -> ModuleRun:
@@ -147,12 +165,11 @@ class ModuleRunner:
         ids = tuple(dict.fromkeys(item.strip() for item in module_ids if item and item.strip()))
         if len(ids) > self.max_modules:
             raise ValueError(f"module run exceeds limit of {self.max_modules} modules")
+        _validate_stage_order(ids)
 
         catalog = module_index()
         executions: list[ModuleExecution] = []
         errors: list[str] = []
-        findings_before = set(store.findings)
-        observations_before = set(store.observations)
         all_follow_ups: list[dict[str, Any]] = []
 
         for module_id in ids:
@@ -181,6 +198,7 @@ class ModuleRunner:
                 target=target,
                 assets=tuple(store.assets),
                 knowledge=store,
+                graph=graph,
                 metadata={
                     **dict(context_metadata or {}),
                     "module_id": module_id,
@@ -189,22 +207,24 @@ class ModuleRunner:
                 },
             )
             try:
-                raw = handler(context)
-                result = _normalize_result(raw, module_id)
+                before_observations = {item.id for item in store.observations}
+                before_findings = {item.id for item in store.findings}
+                result = _normalize_result(handler(context), module_id)
                 for observation in result.observations:
                     store.add_observation(observation)
                 for finding in result.findings:
                     store.add_finding(finding)
+                available = self.max_follow_ups - len(all_follow_ups)
+                if len(result.follow_ups) > available:
+                    raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
 
-                observations_added = sum(1 for item in result.observations if item.id not in observations_before)
-                findings_added = sum(1 for item in result.findings if item.id not in findings_before)
                 executions.append(
                     ModuleExecution(
                         module_id,
                         "completed",
-                        observations_added,
-                        findings_added,
+                        sum(item.id not in before_observations for item in result.observations),
+                        sum(item.id not in before_findings for item in result.findings),
                         len(result.follow_ups),
                     )
                 )
@@ -223,6 +243,48 @@ class ModuleRunner:
             follow_ups=tuple(all_follow_ups),
             errors=tuple(errors[:MAX_ERRORS_PER_RUN]),
         )
+
+
+def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
+    if context.graph is None:
+        return ModuleResult()
+    analysis = analyze_cross_layer(context.graph, context.store())
+    module_id = str(context.metadata.get("module_id", ""))
+    selected = [item for item in analysis.follow_ups if item["module_id"] == module_id]
+    observations = tuple(
+        SecurityObservation(
+            id=f"{module_id}:{item['correlation_id']}",
+            kind=f"cross_layer.{item['correlation_type']}",
+            source=module_id,
+            description=item["reason"],
+            asset_ids=tuple(item["asset_ids"]),
+            data={
+                "correlation_id": item["correlation_id"],
+                "priority": item["priority"],
+            },
+            confidence=float(item["priority"]),
+        )
+        for item in selected[:MAX_RESULT_ITEMS_PER_MODULE]
+    )
+    follow_ups = tuple(item for item in analysis.follow_ups if item["module_id"] != module_id)
+    return ModuleResult(observations=observations, follow_ups=follow_ups[:MAX_FOLLOW_UPS_PER_RUN])
+
+
+def _validate_stage_order(module_ids: tuple[str, ...]) -> None:
+    catalog = module_index()
+    last_stage = -1
+    order = {
+        ModuleStage.WEB_AI: 0,
+        ModuleStage.FOLLOW_UP: 1,
+        ModuleStage.SUPPLEMENTAL: 2,
+    }
+    for module_id in module_ids:
+        if module_id not in catalog:
+            continue
+        stage = order[catalog[module_id].stage]
+        if stage < last_stage:
+            raise ValueError("module plan violates execution-stage ordering")
+        last_stage = stage
 
 
 def _normalize_result(
@@ -246,5 +308,4 @@ def _normalize_result(
 
 
 def executable_module_ids(registry: ModuleRegistry | None = None) -> frozenset[str]:
-    """Return actual implementations, not merely catalog entries."""
     return registry.ids() if registry is not None else frozenset()
