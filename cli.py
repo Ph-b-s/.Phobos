@@ -13,6 +13,7 @@ from crawler import ReconCrawler
 from cross_layer import AttackPath, analyze_cross_layer, correlate_attack_paths
 from evidence import EvidenceStore
 from graph import Graph
+from knowledge_store import KnowledgeStore, SecurityObservation
 from models import Asset, AssetType
 from request_manager import RequestError, RequestManager
 from scanner import ModuleSelection, ScanPlan, default_module_selection, execute_plan, merge_module_selections, validate_plan
@@ -24,9 +25,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="phobos", description="Phobos — AI-assisted web security scanner for AI-enabled applications.")
     parser.add_argument("--version", action="version", version=f"Phobos {PHOBOS_VERSION}")
     sub = parser.add_subparsers(dest="command")
-
     scan = sub.add_parser("scan", help="discover and assess a scoped AI-enabled web application")
-    scan.add_argument("target", help="absolute HTTP(S) target URL")
+    scan.add_argument("target")
     scan.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
     scan.add_argument("--output", default=".phobos")
     scan.add_argument("--timeout", type=float, default=10.0)
@@ -34,24 +34,22 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--max-discovered-urls", type=int, default=5_000)
     scan.add_argument("--user-agent", default=DEFAULT_USER_AGENT)
     scan.add_argument("--allow-private-targets", action="store_true")
-    scan.add_argument("--browser", action="store_true", help="enable Playwright for JavaScript execution and dynamic Web reconnaissance")
+    scan.add_argument("--browser", action="store_true", help="enable Playwright")
     scan.add_argument("--browser-name", choices=("chromium", "firefox", "webkit"), default="chromium")
     scan.add_argument("--browser-max-requests", type=int, default=2_000)
-    scan.add_argument("--nmap", action="store_true", help="enable the optional Nmap web-security module")
-    scan.add_argument("--module", action="append", dest="modules", metavar="MODULE_ID", help="add a security module (repeatable)")
-    scan.add_argument("--no-default-modules", action="store_true", help="disable the default module plan")
-    scan.add_argument("--ai", action="store_true", help="use the local Mistral security brain to prioritize additional modules")
-
-    agent = sub.add_parser("ai", help="ask the local Mistral security brain for a security-module plan")
-    agent.add_argument("request", nargs="+", help="security-planning request")
-    agent.add_argument("--target", required=True, help="explicit HTTP(S) target")
+    scan.add_argument("--nmap", action="store_true", help="enable optional Nmap module")
+    scan.add_argument("--module", action="append", dest="modules", metavar="MODULE_ID")
+    scan.add_argument("--no-default-modules", action="store_true")
+    scan.add_argument("--ai", action="store_true", help="use local Mistral planning")
+    agent = sub.add_parser("ai", help="ask the local Mistral security brain for a module plan")
+    agent.add_argument("request", nargs="+")
+    agent.add_argument("--target", required=True)
     agent.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
     agent.add_argument("--allow-private-targets", action="store_true")
-
-    modules = sub.add_parser("modules", help="list the Phobos vulnerability-module catalog")
+    modules = sub.add_parser("modules", help="list the vulnerability-module catalog")
     modules.add_argument("--json", action="store_true")
     doctor = sub.add_parser("doctor", help="check the local Phobos environment")
-    doctor.add_argument("--quiet", action="store_true", help="only return the diagnostic exit code")
+    doctor.add_argument("--quiet", action="store_true")
     return parser
 
 
@@ -64,8 +62,8 @@ def _target_url(target: str) -> str:
 
 def run_modules(args: argparse.Namespace) -> int:
     rows = [{"id": item.id, "name": item.name, "domain": item.domain.value, "stage": item.stage.value,
-             "active": item.active, "implemented": item.implemented, "tool": item.tool, "description": item.description}
-            for item in module_index().values()]
+             "active": item.active, "implemented": item.implemented, "tool": item.tool,
+             "description": item.description} for item in module_index().values()]
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -99,9 +97,8 @@ def run_doctor(args: argparse.Namespace) -> int:
 def _runtime_available(config: AIConfig) -> bool:
     from urllib.error import URLError
     from urllib.request import Request, urlopen
-    health_url = config.base_url.rsplit("/api/", 1)[0] + "/api/version"
     try:
-        with urlopen(Request(health_url, method="GET"), timeout=2.0):
+        with urlopen(Request(config.base_url.rsplit("/api/", 1)[0] + "/api/version", method="GET"), timeout=2.0):
             return True
     except (OSError, URLError):
         return False
@@ -128,6 +125,22 @@ def _attack_path_dict(path: AttackPath) -> dict:
             "metadata": path.metadata}
 
 
+def _seed_recon_observations(store: KnowledgeStore, assets: tuple[Asset, ...], recon) -> None:
+    """Bridge passive discovery into the common knowledge state without creating findings."""
+    store.add_assets(assets)
+    for asset in assets:
+        if asset.type in {AssetType.ENDPOINT, AssetType.API, AssetType.FORM, AssetType.INPUT, AssetType.JAVASCRIPT, AssetType.PAGE}:
+            store.add_observation(SecurityObservation(
+                id=f"recon.web:{asset.id}", kind=f"recon.web.{asset.type.value}", source="recon.web",
+                description=f"Web reconnaissance discovered {asset.type.value}: {asset.name}",
+                asset_ids=(asset.id,), data={"url": asset.url, "confidence": asset.confidence}, confidence=asset.confidence))
+    for asset in recon.ai_surfaces:
+        store.add_observation(SecurityObservation(
+            id=f"recon.ai:{asset.id}", kind="recon.ai_surface", source="recon.ai",
+            description=f"Passive reconnaissance identified a likely AI surface: {asset.name}",
+            asset_ids=(asset.id,), data={"url": asset.url, "confidence": asset.confidence}, confidence=asset.confidence))
+
+
 def run_scan(args: argparse.Namespace) -> int:
     config = ScanConfig.from_cli(_target_url(args.target), tuple(args.scopes or ()), args.output,
                                  timeout=args.timeout, max_pages=args.max_pages,
@@ -150,8 +163,7 @@ def run_scan(args: argparse.Namespace) -> int:
     try:
         if args.browser:
             browser = PlaywrightBrowserSession(scope,
-                limits=BrowserLimits(max_requests=args.browser_max_requests,
-                                     navigation_timeout_ms=int(config.timeout * 1000)),
+                limits=BrowserLimits(max_requests=args.browser_max_requests, navigation_timeout_ms=int(config.timeout * 1000)),
                 browser_name=args.browser_name, user_agent=config.user_agent)
         recon = ReconCrawler(manager, max_pages=config.max_pages,
                              max_discovered_urls=config.max_discovered_urls, browser=browser).crawl(config.target, graph=graph)
@@ -172,8 +184,11 @@ def run_scan(args: argparse.Namespace) -> int:
         if browser is not None:
             browser.close()
 
+    knowledge = KnowledgeStore()
+    _seed_recon_observations(knowledge, assets, recon)
     try:
-        scan = execute_plan(config.target, assets, plan, metadata={"browser_enabled": args.browser}, graph=graph)
+        scan = execute_plan(config.target, assets, plan, knowledge=knowledge,
+                            metadata={"browser_enabled": args.browser}, graph=graph)
         analysis = analyze_cross_layer(graph, scan.knowledge)
     except (RuntimeError, ValueError, TypeError) as exc:
         output.write_json("scan.json", {"schema_version": "1.0", "target": config.target, "status": "failed", "error": str(exc)})
