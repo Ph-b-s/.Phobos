@@ -193,7 +193,7 @@ def test_local_mistral_client_can_start_runtime(monkeypatch: pytest.MonkeyPatch)
     def fake_json(url, **kwargs):
         if url.endswith("/api/version"):
             calls["health"] += 1
-            if calls["health"] < 2:
+            if calls["health"] < 3:
                 raise ai.AIError("not running")
             return {"version": "0.12.0"}
         if url.endswith("/api/tags"):
