@@ -1,4 +1,4 @@
-"""Local AI reasoning layer for Phobos security scanning.
+"""Local Mistral reasoning layer for Phobos security scanning.
 
 The model is a constrained security-planning brain. Phobos controls scope,
 network access, available modules, and evidence. The model can choose among
@@ -8,7 +8,7 @@ change scope, or manufacture findings.
 The default backend is local Mistral Small 3.2 24B through a locally managed
 Ollama runtime. Ollama is an implementation detail: Phobos can start an
 installed/bundled runtime and pull the pinned model automatically, so end users
-do not need to configure an AI service or API key.
+do not need to configure an AI service or an API key.
 """
 from __future__ import annotations
 
@@ -28,9 +28,6 @@ from urllib.request import Request, urlopen
 
 from security_modules import module_index
 
-# Mistral Small 3.2 is the primary Phobos security-brain model. The Q4_K_M
-# build is the practical local default: the current Ollama package is about
-# 15 GB and retains the full 24B model family.
 MODEL_NAME = "mistral-small3.2:24b-instruct-2506-q4_K_M"
 DEFAULT_BASE_URL = "http://127.0.0.1:11434/api/chat"
 DEFAULT_HEALTH_URL = "http://127.0.0.1:11434/api/version"
@@ -59,19 +56,12 @@ class AIConfig:
 
     base_url: str = DEFAULT_BASE_URL
     model: str = MODEL_NAME
-    api_key: str = ""  # retained for backwards compatibility; never used
     timeout: float = REQUEST_TIMEOUT
     auto_start_runtime: bool = True
     auto_pull_model: bool = True
 
     @classmethod
     def from_env(cls) -> "AIConfig":
-        provider = os.environ.get("PHOBOS_AI_PROVIDER", "local").strip().lower()
-        if provider not in {"local", "mistral-local", "ollama"}:
-            raise AIError(
-                "unsupported AI provider; Phobos currently uses the local Mistral runtime"
-            )
-
         base_url = os.environ.get("PHOBOS_AI_URL", DEFAULT_BASE_URL).strip()
         model = os.environ.get("PHOBOS_AI_MODEL", MODEL_NAME).strip()
         if not model:
@@ -149,26 +139,11 @@ def _validate_local_url(value: str) -> None:
 
 
 def _extract_text(payload: dict[str, Any]) -> str:
-    choices = payload.get("choices")
-    if isinstance(choices, list) and choices:
-        first = choices[0]
-        if isinstance(first, dict):
-            message = first.get("message")
-            if isinstance(message, dict):
-                content = message.get("content")
-                if isinstance(content, str) and content.strip():
-                    return content.strip()
-
     message = payload.get("message")
     if isinstance(message, dict):
         content = message.get("content")
         if isinstance(content, str) and content.strip():
             return content.strip()
-
-    direct = payload.get("output_text")
-    if isinstance(direct, str) and direct.strip():
-        return direct.strip()
-
     raise AIError("AI response contained no text")
 
 
@@ -181,8 +156,6 @@ def _parse_decision(text: str) -> dict[str, Any]:
     try:
         value = json.loads(cleaned)
     except json.JSONDecodeError:
-        # Local instruct models occasionally add one sentence around the JSON.
-        # Extract the first balanced object but still validate it strictly below.
         start = cleaned.find("{")
         end = cleaned.rfind("}")
         if start < 0 or end <= start:
@@ -370,7 +343,6 @@ class LocalMistralClient:
         _validate_local_url(config.base_url)
         self.config = config
         self.status_callback = status_callback
-        self._runtime_started = False
 
     def _status(self, message: str) -> None:
         if self.status_callback is not None:
@@ -395,7 +367,6 @@ class LocalMistralClient:
 
             self._status("Starting local AI engine")
             _start_ollama()
-            self._runtime_started = True
             _wait_for_runtime(STARTUP_TIMEOUT)
 
     def _installed_models(self) -> set[str]:
@@ -478,12 +449,3 @@ class LocalMistralClient:
             timeout=self.config.timeout,
         )
         return _parse_decision(_extract_text(payload))
-
-    def decide(self, request_text: str) -> dict[str, Any]:
-        """Compatibility wrapper for older callers."""
-        return self.plan(request_text)
-
-
-# Compatibility names prevent older callers from breaking during migration.
-VeniceClient = LocalMistralClient
-OpenAIResponsesClient = LocalMistralClient
