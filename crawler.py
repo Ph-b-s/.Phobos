@@ -8,6 +8,7 @@ from urllib.parse import parse_qsl, urlencode, urljoin, urlparse, urlunparse
 
 from ai_surface import detect_ai_surfaces
 from browser_adapter import BrowserAdapterError, BrowserSession
+from cross_application import ApplicationCandidate, discover_related_applications
 from graph import Graph
 from models import Asset, AssetType, EndpointAsset, FormAsset, InputAsset
 from request_manager import RequestError, RequestManager
@@ -76,6 +77,7 @@ class ReconResult:
     ai_surfaces: tuple[Asset, ...]
     browser_observations: tuple[object, ...]
     errors: tuple[str, ...]
+    related_applications: tuple[ApplicationCandidate, ...] = ()
 
     @property
     def assets(self) -> tuple[Asset, ...]:
@@ -102,6 +104,8 @@ class ReconCrawler:
         seen_js: set[str] = set()
         seen_query_inputs: set[tuple[str, str]] = set()
         seen_ai: set[tuple[str, str]] = set()
+        related_links: set[str] = set()
+        related_pages: list[dict[str, object]] = []
         counters = {kind: 0 for kind in ("page", "endpoint", "form", "input", "javascript", "ai_surface")}
         pages: list[Asset] = []
         endpoints: list[EndpointAsset] = []
@@ -123,10 +127,8 @@ class ReconCrawler:
                 return
             seen_endpoints.add(key)
             counters["endpoint"] += 1
-            endpoint = EndpointAsset(
-                f"endpoint_{counters['endpoint']:04d}", AssetType.ENDPOINT, normalized, normalized,
-                confidence, metadata, method, None,
-            )
+            endpoint = EndpointAsset(f"endpoint_{counters['endpoint']:04d}", AssetType.ENDPOINT, normalized, normalized,
+                                     confidence, metadata, method, None)
             endpoints.append(endpoint)
             if graph is not None:
                 graph.add_node(id=endpoint.id, type=endpoint.type.value, label=endpoint.name, attributes=endpoint.metadata)
@@ -137,10 +139,8 @@ class ReconCrawler:
                     continue
                 seen_query_inputs.add(input_key)
                 counters["input"] += 1
-                input_asset = InputAsset(
-                    f"input_{counters['input']:04d}", AssetType.INPUT, name, normalized, 1.0,
-                    {"source_endpoint": normalized, "source_page": page.url}, "query", "query", method,
-                )
+                input_asset = InputAsset(f"input_{counters['input']:04d}", AssetType.INPUT, name, normalized, 1.0,
+                                         {"source_endpoint": normalized, "source_page": page.url}, "query", "query", method)
                 inputs.append(input_asset)
                 if graph is not None:
                     graph.add_node(id=input_asset.id, type=input_asset.type.value, label=input_asset.name, attributes=input_asset.metadata)
@@ -161,11 +161,10 @@ class ReconCrawler:
                 continue
 
             counters["page"] += 1
-            page = Asset(
-                f"page_{counters['page']:04d}", AssetType.PAGE, response.url, response.url, 1.0,
-                {"status_code": response.status, "content_type": content_type},
-            )
+            page = Asset(f"page_{counters['page']:04d}", AssetType.PAGE, response.url, response.url, 1.0,
+                         {"status_code": response.status, "content_type": content_type})
             pages.append(page)
+            related_pages.append({"url": response.url, "text": response.text[:20_000]})
             if graph is not None:
                 graph.add_node(id=page.id, type=page.type.value, label=page.name, attributes=page.metadata)
 
@@ -191,14 +190,18 @@ class ReconCrawler:
                     discovered_scripts.update(browser_snapshot.scripts)
                     discovered_forms.extend(browser_snapshot.forms)
                     rendered_text = browser_snapshot.text or rendered_text
+                    related_pages.append({"url": browser_snapshot.url, "text": browser_snapshot.text[:20_000]})
                     if rendered_url != response.url:
                         discovered_links.add(rendered_url)
                 except BrowserAdapterError as exc:
                     errors.append(f"{response.url}: browser error: {exc}")
 
+            related_links.update(discovered_links)
             for link in sorted(discovered_links):
                 normalized = normalize_url(response.url, link)
-                if not normalized or not self.request_manager.scope.is_in_scope(normalized):
+                if not normalized:
+                    continue
+                if not self.request_manager.scope.is_in_scope(normalized):
                     continue
                 if normalized not in visited and normalized not in discovered:
                     if len(discovered) >= self.max_discovered_urls:
@@ -224,17 +227,13 @@ class ReconCrawler:
                 seen_js.add(script)
                 counters["javascript"] += 1
                 dynamic = script not in parser.result.scripts
-                asset = Asset(
-                    f"javascript_{counters['javascript']:04d}", AssetType.JAVASCRIPT, script, script,
-                    0.90 if dynamic else 0.98,
-                    {"source_page": response.url, "discovery": "dynamic_dom" if dynamic else "html_script"},
-                )
+                asset = Asset(f"javascript_{counters['javascript']:04d}", AssetType.JAVASCRIPT, script, script,
+                              0.90 if dynamic else 0.98,
+                              {"source_page": response.url, "discovery": "dynamic_dom" if dynamic else "html_script"})
                 javascript.append(asset)
                 if graph is not None:
                     graph.add_node(id=asset.id, type=asset.type.value, label=asset.name, attributes=asset.metadata)
                     graph.add_edge(source=page.id, target=asset.id, relationship="loads")
-
-                # Fetch same-scope JavaScript as data, never as executable Python.
                 try:
                     js_response = self.request_manager.get(script)
                     js_type = js_response.headers.get("content-type", "").lower()
@@ -256,11 +255,9 @@ class ReconCrawler:
                 raw_inputs = form_data.get("inputs", ())
                 named = tuple(str(item.get("name", "")) for item in raw_inputs if isinstance(item, dict) and item.get("name"))
                 dynamic = form_data not in parser.result.forms
-                form = FormAsset(
-                    f"form_{counters['form']:04d}", AssetType.FORM, f"{response.url}#{index}", action, 1.0,
-                    {"source_page": response.url, "discovery": "browser_dom" if dynamic else "html"},
-                    str(form_data.get("method") or "GET").upper(), named,
-                )
+                form = FormAsset(f"form_{counters['form']:04d}", AssetType.FORM, f"{response.url}#{index}", action, 1.0,
+                                 {"source_page": response.url, "discovery": "browser_dom" if dynamic else "html"},
+                                 str(form_data.get("method") or "GET").upper(), named)
                 forms.append(form)
                 if graph is not None:
                     graph.add_node(id=form.id, type=form.type.value, label=form.name, attributes=form.metadata)
@@ -269,26 +266,20 @@ class ReconCrawler:
                     if not isinstance(item, dict) or not item.get("name"):
                         continue
                     counters["input"] += 1
-                    input_asset = InputAsset(
-                        f"input_{counters['input']:04d}", AssetType.INPUT, str(item["name"]), action, 1.0,
-                        {"source_form": form.id, "source_page": response.url}, str(item.get("type") or "text"), "form", form.method,
-                    )
+                    input_asset = InputAsset(f"input_{counters['input']:04d}", AssetType.INPUT, str(item["name"]), action, 1.0,
+                                             {"source_form": form.id, "source_page": response.url}, str(item.get("type") or "text"), "form", form.method)
                     inputs.append(input_asset)
                     if graph is not None:
                         graph.add_node(id=input_asset.id, type=input_asset.type.value, label=input_asset.name, attributes=input_asset.metadata)
                         graph.add_edge(source=form.id, target=input_asset.id, relationship="accepts")
 
-            for candidate in detect_ai_surfaces(
-                response.url, rendered_text, links=discovered_links, scripts=discovered_scripts, forms=discovered_forms,
-            ):
+            for candidate in detect_ai_surfaces(response.url, rendered_text, links=discovered_links, scripts=discovered_scripts, forms=discovered_forms):
                 if not self.request_manager.scope.is_in_scope(candidate.url) or candidate.key() in seen_ai:
                     continue
                 seen_ai.add(candidate.key())
                 counters["ai_surface"] += 1
-                asset = Asset(
-                    f"ai_surface_{counters['ai_surface']:04d}", AssetType.AI_AGENT, candidate.kind, candidate.url,
-                    candidate.confidence, {"source_page": response.url, "evidence": list(candidate.evidence)},
-                )
+                asset = Asset(f"ai_surface_{counters['ai_surface']:04d}", AssetType.AI_AGENT, candidate.kind, candidate.url,
+                              candidate.confidence, {"source_page": response.url, "evidence": list(candidate.evidence)})
                 ai_surfaces.append(asset)
                 if graph is not None:
                     graph.add_node(id=asset.id, type=asset.type.value, label=asset.name, attributes=asset.metadata)
@@ -296,5 +287,7 @@ class ReconCrawler:
 
         if self.browser is not None:
             browser_observations.extend(self.browser.network_observations())
-
-        return ReconResult(tuple(pages), tuple(endpoints), tuple(forms), tuple(inputs), tuple(javascript), tuple(ai_surfaces), tuple(browser_observations), tuple(errors))
+        related = discover_related_applications(target, tuple(sorted(related_links)), tuple(related_pages),
+                                                 same_registrable_domain=False)
+        return ReconResult(tuple(pages), tuple(endpoints), tuple(forms), tuple(inputs), tuple(javascript), tuple(ai_surfaces),
+                           tuple(browser_observations), tuple(errors), related)
