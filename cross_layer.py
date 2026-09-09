@@ -15,8 +15,8 @@ from knowledge_store import KnowledgeStore, SecurityObservation
 
 _WEB_TYPES = {"website", "page", "endpoint", "form", "input", "javascript", "api", "resource"}
 _AI_TYPES = {"ai_agent", "tool"}
-_WEB_SOURCE_PREFIXES = ("web.", "browser.", "recon.")
-_AI_SOURCE_PREFIXES = ("ai.", "llm.", "agent.")
+_WEB_SOURCE_PREFIXES = ("web.", "browser.", "recon.web")
+_AI_SOURCE_PREFIXES = ("ai.", "llm.", "agent.", "recon.ai")
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,11 +66,9 @@ def correlate_attack_paths(graph: Graph, *, max_hops: int = 6, max_paths: int = 
         raise ValueError("max_paths must be at least 1")
 
     types = {node.id: node.type for node in graph.nodes}
-    adjacency: dict[str, tuple[tuple[str, str], ...]] = defaultdict(tuple)
-    mutable: dict[str, list[tuple[str, str]]] = {node.id: [] for node in graph.nodes}
+    adjacency: dict[str, list[tuple[str, str]]] = {node.id: [] for node in graph.nodes}
     for edge in graph.edges:
-        mutable.setdefault(edge.source, []).append((edge.target, edge.relationship))
-    adjacency = {key: tuple(value) for key, value in mutable.items()}
+        adjacency.setdefault(edge.source, []).append((edge.target, edge.relationship))
 
     paths: list[AttackPath] = []
     seen: set[tuple[str, ...]] = set()
@@ -87,7 +85,6 @@ def correlate_attack_paths(graph: Graph, *, max_hops: int = 6, max_paths: int = 
                 new_relationships = (*relationships, relationship)
                 if len(new_nodes) > max_hops + 1:
                     continue
-
                 domains = tuple("ai" if types.get(node) in _AI_TYPES else "web" for node in new_nodes)
                 if "ai" in domains and "web" in domains and new_nodes not in seen:
                     seen.add(new_nodes)
@@ -95,17 +92,15 @@ def correlate_attack_paths(graph: Graph, *, max_hops: int = 6, max_paths: int = 
                     last_ai = len(domains) - 1 - tuple(reversed(domains)).index("ai")
                     pattern = _pattern(domains, first_ai, last_ai)
                     confidence = min(0.95, 0.55 + 0.06 * max(0, len(new_nodes) - 2))
-                    paths.append(
-                        AttackPath(
-                            id=f"attack_path_{len(paths) + 1:04d}",
-                            nodes=new_nodes,
-                            relationships=new_relationships,
-                            pattern=pattern,
-                            confidence=confidence,
-                            rationale=_rationale(pattern),
-                            metadata={"node_types": [types.get(node, "unknown") for node in new_nodes]},
-                        )
-                    )
+                    paths.append(AttackPath(
+                        id=f"attack_path_{len(paths) + 1:04d}",
+                        nodes=new_nodes,
+                        relationships=new_relationships,
+                        pattern=pattern,
+                        confidence=confidence,
+                        rationale=_rationale(pattern),
+                        metadata={"node_types": [types.get(node, "unknown") for node in new_nodes]},
+                    ))
                 if len(new_nodes) <= max_hops:
                     queue.append((target, new_nodes, new_relationships))
     return tuple(paths)
@@ -114,48 +109,62 @@ def correlate_attack_paths(graph: Graph, *, max_hops: int = 6, max_paths: int = 
 def correlate_observations(
     knowledge: KnowledgeStore,
     *,
+    attack_paths: Iterable[AttackPath] = (),
     max_correlations: int = 200,
 ) -> tuple[Correlation, ...]:
-    """Join observations that reference the same assets across Web and AI sources."""
+    """Correlate Web and AI observations by shared assets or graph attack paths."""
     if max_correlations < 1:
         raise ValueError("max_correlations must be at least 1")
 
-    by_asset: dict[str, list[SecurityObservation]] = defaultdict(list)
-    for observation in knowledge.observations:
-        for asset_id in observation.asset_ids:
-            by_asset[asset_id].append(observation)
-
+    observations = knowledge.observations
     result: list[Correlation] = []
     seen: set[tuple[str, ...]] = set()
-    for asset_id in sorted(by_asset):
-        observations = by_asset[asset_id]
-        web = [item for item in observations if _is_web_source(item.source)]
-        ai = [item for item in observations if _is_ai_source(item.source)]
+
+    def add(kind: str, asset_ids: tuple[str, ...], items: Iterable[SecurityObservation], *, path_id: str | None = None) -> None:
+        if len(result) >= max_correlations:
+            return
+        selected = tuple(items)
+        web = [item for item in selected if _is_web_source(item.source)]
+        ai = [item for item in selected if _is_ai_source(item.source)]
         if not web or not ai:
-            continue
-        observation_ids = tuple(sorted({item.id for item in (*web, *ai)}))
-        signature = (asset_id, *observation_ids)
+            return
+        observation_ids = tuple(sorted({item.id for item in selected}))
+        signature = (kind, path_id or "", *observation_ids)
         if signature in seen:
-            continue
+            return
         seen.add(signature)
-        confidence = min(0.95, (sum(item.confidence for item in (*web, *ai)) / len((*web, *ai))) + 0.10)
-        result.append(
-            Correlation(
-                id=f"correlation_{len(result) + 1:04d}",
-                kind="shared_asset_web_ai",
-                asset_ids=(asset_id,),
-                observation_ids=observation_ids,
-                confidence=confidence,
-                rationale="Web and AI observations independently reference the same discovered asset.",
-            )
-        )
+        confidence = min(0.95, (sum(item.confidence for item in selected) / len(selected)) + 0.10)
+        result.append(Correlation(
+            id=f"correlation_{len(result) + 1:04d}",
+            kind=kind,
+            asset_ids=tuple(dict.fromkeys(asset_ids)),
+            observation_ids=observation_ids,
+            attack_path_id=path_id,
+            confidence=confidence,
+            rationale=("Web and AI observations reference a common discovered asset."
+                        if kind == "shared_asset_web_ai"
+                        else "Web and AI observations occur on the same correlated attack path."),
+        ))
+
+    by_asset: dict[str, list[SecurityObservation]] = defaultdict(list)
+    for observation in observations:
+        for asset_id in observation.asset_ids:
+            by_asset[asset_id].append(observation)
+    for asset_id in sorted(by_asset):
+        add("shared_asset_web_ai", (asset_id,), by_asset[asset_id])
         if len(result) >= max_correlations:
             return tuple(result)
+
+    for path in attack_paths:
+        node_set = set(path.nodes)
+        selected = tuple(item for item in observations if node_set.intersection(item.asset_ids))
+        add("attack_path_evidence", tuple(path.nodes), selected, path_id=path.id)
+        if len(result) >= max_correlations:
+            break
     return tuple(result)
 
 
 def correlate_findings(knowledge: KnowledgeStore, *, max_correlations: int = 200) -> tuple[Correlation, ...]:
-    """Correlate findings with observations using asset/evidence references where available."""
     if max_correlations < 1:
         raise ValueError("max_correlations must be at least 1")
     observations = {item.id: item for item in knowledge.observations}
@@ -167,17 +176,15 @@ def correlate_findings(knowledge: KnowledgeStore, *, max_correlations: int = 200
         asset_ids = tuple(sorted({asset for item_id in referenced for asset in observations[item_id].asset_ids}))
         if not asset_ids:
             continue
-        result.append(
-            Correlation(
-                id=f"finding_correlation_{len(result) + 1:04d}",
-                kind="finding_evidence_bridge",
-                asset_ids=asset_ids,
-                observation_ids=referenced,
-                finding_ids=(finding.id,),
-                confidence=finding.confidence,
-                rationale="A finding is explicitly linked to structured observations on the same assets.",
-            )
-        )
+        result.append(Correlation(
+            id=f"finding_correlation_{len(result) + 1:04d}",
+            kind="finding_evidence_bridge",
+            asset_ids=asset_ids,
+            observation_ids=referenced,
+            finding_ids=(finding.id,),
+            confidence=finding.confidence,
+            rationale="A finding is explicitly linked to structured observations on the same assets.",
+        ))
         if len(result) >= max_correlations:
             break
     return tuple(result)
@@ -192,46 +199,40 @@ def analyze_cross_layer(
     max_correlations: int = 200,
 ) -> CrossLayerAnalysis:
     paths = correlate_attack_paths(graph, max_hops=max_hops, max_paths=max_paths)
-    correlations = list(correlate_observations(knowledge, max_correlations=max_correlations))
+    correlations = list(correlate_observations(knowledge, attack_paths=paths, max_correlations=max_correlations))
     remaining = max(0, max_correlations - len(correlations))
     if remaining:
         correlations.extend(correlate_findings(knowledge, max_correlations=remaining))
-
-    follow_ups = _build_follow_ups(paths, correlations)
-    return CrossLayerAnalysis(paths, tuple(correlations), follow_ups)
+    return CrossLayerAnalysis(paths, tuple(correlations), _build_follow_ups(paths, correlations))
 
 
 def _build_follow_ups(paths: Iterable[AttackPath], correlations: Iterable[Correlation]) -> tuple[dict[str, Any], ...]:
     result: list[dict[str, Any]] = []
     for path in paths:
-        module_id = {
-            "web_to_ai": "cross_layer.web_to_ai",
-            "ai_to_web": "cross_layer.ai_to_web",
-            "web_to_ai_to_web": "cross_layer.attack_path",
-            "ai_internal": "cross_layer.control_flow",
-        }.get(path.pattern, "cross_layer.attack_path")
-        result.append({
-            "module_id": module_id,
-            "priority": round(path.confidence, 3),
-            "correlation_type": "attack_path",
-            "correlation_id": path.id,
-            "asset_ids": list(path.nodes),
-            "reason": path.rationale,
-        })
+        modules = {"web_to_ai": ("cross_layer.web_to_ai",), "ai_to_web": ("cross_layer.ai_to_web",),
+                   "web_to_ai_to_web": ("cross_layer.web_to_ai", "cross_layer.ai_to_web", "cross_layer.attack_path"),
+                   "ai_internal": ("cross_layer.control_flow",)}[path.pattern]
+        relationship_text = " ".join(path.relationships).lower()
+        if any(token in relationship_text for token in ("auth", "authorize", "permission", "identity", "session")):
+            modules += ("cross_layer.auth_boundary",)
+        if any(token in relationship_text for token in ("data", "returns", "reads", "writes", "contains", "passes")):
+            modules += ("cross_layer.data_flow",)
+        if any(token in relationship_text for token in ("invoke", "call", "execute", "controls", "tool")):
+            modules += ("cross_layer.capability_escalation",)
+        for module_id in dict.fromkeys(modules):
+            result.append({"module_id": module_id, "priority": round(path.confidence, 3),
+                           "correlation_type": "attack_path", "correlation_id": path.id,
+                           "asset_ids": list(path.nodes), "reason": path.rationale})
     for correlation in correlations:
-        result.append({
-            "module_id": "cross_layer.data_flow",
-            "priority": round(correlation.confidence, 3),
-            "correlation_type": correlation.kind,
-            "correlation_id": correlation.id,
-            "asset_ids": list(correlation.asset_ids),
-            "reason": correlation.rationale,
-        })
-    return tuple(sorted(result, key=lambda item: (-item["priority"], item["correlation_id"])))
+        module_id = "cross_layer.data_flow" if correlation.kind in {"shared_asset_web_ai", "attack_path_evidence"} else "cross_layer.data_flow"
+        result.append({"module_id": module_id, "priority": round(correlation.confidence, 3),
+                       "correlation_type": correlation.kind, "correlation_id": correlation.id,
+                       "asset_ids": list(correlation.asset_ids), "reason": correlation.rationale})
+    return tuple(sorted(result, key=lambda item: (-item["priority"], item["correlation_id"], item["module_id"])))
 
 
 def _is_web_source(source: str) -> bool:
-    return source.startswith(_WEB_SOURCE_PREFIXES) or source in {"crawler", "browser"}
+    return source.startswith(_WEB_SOURCE_PREFIXES) or source in {"crawler", "browser", "recon"}
 
 
 def _is_ai_source(source: str) -> bool:
@@ -258,26 +259,13 @@ def _rationale(pattern: str) -> str:
 
 
 def _attack_path_dict(path: AttackPath) -> dict[str, Any]:
-    return {
-        "id": path.id,
-        "nodes": list(path.nodes),
-        "relationships": list(path.relationships),
-        "pattern": path.pattern,
-        "confidence": path.confidence,
-        "rationale": path.rationale,
-        "metadata": path.metadata,
-    }
+    return {"id": path.id, "nodes": list(path.nodes), "relationships": list(path.relationships),
+            "pattern": path.pattern, "confidence": path.confidence, "rationale": path.rationale,
+            "metadata": path.metadata}
 
 
 def _correlation_dict(item: Correlation) -> dict[str, Any]:
-    return {
-        "id": item.id,
-        "kind": item.kind,
-        "asset_ids": list(item.asset_ids),
-        "observation_ids": list(item.observation_ids),
-        "finding_ids": list(item.finding_ids),
-        "attack_path_id": item.attack_path_id,
-        "confidence": item.confidence,
-        "rationale": item.rationale,
-        "metadata": item.metadata,
-    }
+    return {"id": item.id, "kind": item.kind, "asset_ids": list(item.asset_ids),
+            "observation_ids": list(item.observation_ids), "finding_ids": list(item.finding_ids),
+            "attack_path_id": item.attack_path_id, "confidence": item.confidence,
+            "rationale": item.rationale, "metadata": item.metadata}
