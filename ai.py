@@ -5,10 +5,9 @@ network access, available modules, and evidence. The model can choose among
 registered security capabilities, but it cannot execute arbitrary commands,
 change scope, or manufacture findings.
 
-The default backend is local Mistral Small 3.2 24B through a locally managed
-Ollama runtime. Ollama is an implementation detail: Phobos can start an
-installed/bundled runtime and pull the pinned model automatically, so end users
-do not need to configure an AI service or an API key.
+The default backend is local Mistral through a locally managed Ollama runtime.
+The runtime and model are implementation details; normal users do not need to
+configure an AI service or API key.
 """
 from __future__ import annotations
 
@@ -63,11 +62,19 @@ class AIConfig:
     @classmethod
     def from_env(cls) -> "AIConfig":
         base_url = os.environ.get("PHOBOS_AI_URL", DEFAULT_BASE_URL).strip()
-        model = os.environ.get("PHOBOS_AI_MODEL", MODEL_NAME).strip()
-        if not model:
-            raise AIError("PHOBOS_AI_MODEL must not be empty")
-        _validate_local_url(base_url)
+        requested_model = os.environ.get("PHOBOS_AI_MODEL", "").strip()
+        if requested_model:
+            model = requested_model
+        else:
+            # Lazy import avoids an ai.py <-> ai_setup.py import cycle while
+            # still letting normal Phobos startup choose the best local model.
+            try:
+                from ai_setup import detect_hardware, select_model
 
+                model = select_model(detect_hardware()).name
+            except (ImportError, OSError, RuntimeError, ValueError):
+                model = MODEL_NAME
+        _validate_local_url(base_url)
         return cls(
             base_url=base_url,
             model=model,
@@ -139,11 +146,26 @@ def _validate_local_url(value: str) -> None:
 
 
 def _extract_text(payload: dict[str, Any]) -> str:
+    choices = payload.get("choices")
+    if isinstance(choices, list) and choices:
+        first = choices[0]
+        if isinstance(first, dict):
+            message = first.get("message")
+            if isinstance(message, dict):
+                content = message.get("content")
+                if isinstance(content, str) and content.strip():
+                    return content.strip()
+
     message = payload.get("message")
     if isinstance(message, dict):
         content = message.get("content")
         if isinstance(content, str) and content.strip():
             return content.strip()
+
+    direct = payload.get("output_text")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+
     raise AIError("AI response contained no text")
 
 
@@ -330,12 +352,7 @@ def _wait_for_runtime(timeout: float) -> None:
 
 
 class LocalMistralClient:
-    """Phobos's local Mistral provider.
-
-    The client talks to a loopback-only Ollama API. The runtime itself may be
-    user-installed during development or bundled beside the desktop binary in
-    production. Model acquisition is automatic and idempotent.
-    """
+    """Phobos's local Mistral provider."""
 
     def __init__(self, config: AIConfig, *, status_callback: Callable[[str], None] | None = None):
         if config.timeout <= 0:
@@ -343,6 +360,7 @@ class LocalMistralClient:
         _validate_local_url(config.base_url)
         self.config = config
         self.status_callback = status_callback
+        self._runtime_started = False
 
     def _status(self, message: str) -> None:
         if self.status_callback is not None:
@@ -367,6 +385,7 @@ class LocalMistralClient:
 
             self._status("Starting local AI engine")
             _start_ollama()
+            self._runtime_started = True
             _wait_for_runtime(STARTUP_TIMEOUT)
 
     def _installed_models(self) -> set[str]:
@@ -390,7 +409,7 @@ class LocalMistralClient:
                 f"Mistral model '{self.config.model}' is not installed and automatic model acquisition is disabled"
             )
 
-        self._status("Preparing the Phobos Mistral model (first run may download several GB)")
+        self._status("Preparing the Phobos Mistral model")
         body = {"name": self.config.model, "stream": False}
         try:
             _http_json(
@@ -449,3 +468,6 @@ class LocalMistralClient:
             timeout=self.config.timeout,
         )
         return _parse_decision(_extract_text(payload))
+
+    def decide(self, request_text: str) -> dict[str, Any]:
+        return self.plan(request_text)
