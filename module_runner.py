@@ -124,7 +124,7 @@ class ModuleRunner:
 
     def run(self, target: str, module_ids: Iterable[str], *, knowledge: KnowledgeStore | None = None,
             graph: Graph | None = None, context_metadata: Mapping[str, Any] | None = None,
-            assets: tuple[Any, ...] = ()) -> ModuleRun:
+            assets: tuple[Any, ...] = (), capabilities: Mapping[str, Any] | None = None) -> ModuleRun:
         store = knowledge or KnowledgeStore()
         if assets:
             store.add_assets(assets)
@@ -136,6 +136,7 @@ class ModuleRunner:
         executions: list[ModuleExecution] = []
         errors: list[str] = []
         all_follow_ups: list[dict[str, Any]] = []
+        caps = dict(capabilities or {})
 
         for module_id in ids:
             spec = catalog.get(module_id)
@@ -155,6 +156,9 @@ class ModuleRunner:
                 continue
 
             context = ModuleContext(target=target, assets=tuple(store.assets), knowledge=store, graph=graph,
+                                    browser=caps.get("browser"), interactor=caps.get("interactor"),
+                                    accounts=caps.get("accounts"), workflow=caps.get("workflow"),
+                                    applications=tuple(caps.get("applications", ())),
                                     metadata={**dict(context_metadata or {}), "module_id": module_id,
                                               "module_domain": spec.domain.value, "module_stage": spec.stage.value})
             try:
@@ -169,12 +173,9 @@ class ModuleRunner:
                 if len(result.follow_ups) > available:
                     raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
-                executions.append(ModuleExecution(
-                    module_id, "completed",
+                executions.append(ModuleExecution(module_id, "completed",
                     sum(item.id not in before_observations for item in result.observations),
-                    sum(item.id not in before_findings for item in result.findings),
-                    len(result.follow_ups),
-                ))
+                    sum(item.id not in before_findings for item in result.findings), len(result.follow_ups)))
             except Exception as exc:
                 message = f"{module_id}: {type(exc).__name__}: {exc}"
                 if len(errors) < MAX_ERRORS_PER_RUN:
