@@ -13,6 +13,7 @@ from typing import Any
 from account_manager import AccountManager
 from browser_adapter import BrowserLimits, BrowserSession, PlaywrightBrowserSession
 from browser_interaction import BrowserInteractor
+from config import PHOBOS_VERSION
 from cross_application import ApplicationCandidate, discover_related_applications
 from request_manager import RequestManager
 from scanner import ScanPlan, ScanResult, execute_plan
@@ -33,8 +34,18 @@ class PhobosServices:
     browser_interactor: BrowserInteractor | None = None
     applications: tuple[ApplicationCandidate, ...] = ()
 
-    def discover_supporting_apps(self, links: list[str] | tuple[str, ...] = (), *, pages: list[dict[str, Any]] | tuple[dict[str, Any], ...] = ()) -> tuple[ApplicationCandidate, ...]:
-        candidates = discover_related_applications(self.target, tuple(links), tuple(pages))
+    def discover_supporting_apps(
+        self,
+        links: list[str] | tuple[str, ...] = (),
+        *,
+        pages: list[dict[str, Any]] | tuple[dict[str, Any], ...] = (),
+    ) -> tuple[ApplicationCandidate, ...]:
+        candidates = discover_related_applications(
+            self.target,
+            tuple(links),
+            tuple(pages),
+            same_registrable_domain=False,
+        )
         self.applications = candidates
         return candidates
 
@@ -52,7 +63,7 @@ def create_services(
     timeout: float = 10.0,
     max_redirects: int = 5,
     max_response_bytes: int = 2_000_000,
-    user_agent: str = "Phobos/0.7.0",
+    user_agent: str | None = None,
     allow_private_targets: bool = False,
     browser: bool = True,
     browser_name: str = "chromium",
@@ -60,11 +71,12 @@ def create_services(
 ) -> PhobosServices:
     scope = ScopeValidator(tuple(scopes), allow_private_targets=allow_private_targets)
     scope.validate(target)
+    effective_user_agent = user_agent or f"Phobos/{PHOBOS_VERSION}"
     requests = RequestManager(
         scope,
         timeout=timeout,
         max_redirects=max_redirects,
-        user_agent=user_agent,
+        user_agent=effective_user_agent,
         max_response_bytes=max_response_bytes,
     )
     accounts = AccountManager()
@@ -74,12 +86,23 @@ def create_services(
     if browser:
         session = PlaywrightBrowserSession(
             scope,
-            limits=BrowserLimits(max_requests=browser_max_requests, navigation_timeout_ms=int(timeout * 1000)),
+            limits=BrowserLimits(
+                max_requests=browser_max_requests,
+                navigation_timeout_ms=int(timeout * 1000),
+            ),
             browser_name=browser_name,
-            user_agent=user_agent,
+            user_agent=effective_user_agent,
         )
         interactor = BrowserInteractor(session)
-    return PhobosServices(target, scope, requests, accounts, workflows, session, interactor)
+    return PhobosServices(
+        target,
+        scope,
+        requests,
+        accounts,
+        workflows,
+        session,
+        interactor,
+    )
 
 
 def execute_scan(
