@@ -4,9 +4,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, Iterable
 
+from graph import Graph
 from knowledge_store import KnowledgeStore
 from models import Asset, Finding
-from security_modules import ModuleContext, ModuleStage, module_index
+from module_runner import ModuleRegistry, ModuleRunner, default_module_registry
+from security_modules import ModuleStage, module_index
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,10 +57,12 @@ def merge_module_selections(base: ScanPlan, additions: Iterable[ModuleSelection]
     seen = {item.module_id for item in combined}
     for selection in additions:
         if selection.module_id not in seen:
+            if selection.module_id not in catalog:
+                raise ValueError(f"unknown security module: {selection.module_id}")
             combined.append(selection)
             seen.add(selection.module_id)
     stage_order = {ModuleStage.WEB_AI: 0, ModuleStage.FOLLOW_UP: 1, ModuleStage.SUPPLEMENTAL: 2}
-    combined.sort(key=lambda item: stage_order[catalog[item.module_id].stage])
+    combined.sort(key=lambda item: (stage_order[catalog[item.module_id].stage], item.module_id))
     return ScanPlan(tuple(combined), source=source or base.source)
 
 
@@ -97,37 +101,44 @@ def execute_plan(
     assets: tuple[Asset, ...],
     plan: ScanPlan,
     *,
-    runners: dict[str, Any] | None = None,
+    runners: dict[str, Any] | ModuleRegistry | None = None,
     metadata: dict[str, Any] | None = None,
     knowledge: KnowledgeStore | None = None,
+    graph: Graph | None = None,
 ) -> ScanResult:
-    """Execute modules against one shared mutable security knowledge state."""
+    """Execute a plan through the production module runner.
+
+    A mapping of handlers remains supported for extension/backward compatibility.
+    When omitted, Phobos uses its built-in registry.
+    """
     plan = validate_plan(plan)
-    store = knowledge or KnowledgeStore()
-    store.add_assets(assets)
-    runner_map = runners or {}
-    catalog = module_index()
-    modules_run: list[str] = []
-    errors: list[str] = []
+    if isinstance(runners, ModuleRegistry):
+        registry = runners
+    elif runners is None:
+        registry = default_module_registry()
+    else:
+        registry = default_module_registry()
+        for module_id, handler in runners.items():
+            registry.replace(module_id, handler)
 
-    for selection in plan.selections:
-        spec = catalog[selection.module_id]
-        runner = runner_map.get(selection.module_id)
-        if runner is None:
-            continue
-        context = ModuleContext(
-            target=target,
-            assets=tuple(store.assets),
-            knowledge=store,
-            metadata=dict(metadata or {}),
-        )
-        try:
-            result = tuple(runner(context))
-            for item in result:
-                if isinstance(item, Finding):
-                    store.add_finding(item)
-            modules_run.append(spec.id)
-        except Exception as exc:
-            errors.append(f"{spec.id}: {type(exc).__name__}: {exc}")
-
-    return ScanResult(target, tuple(store.assets), store.findings, tuple(modules_run), tuple(errors), store)
+    runner = ModuleRunner(registry)
+    result = runner.run(
+        target,
+        (selection.module_id for selection in plan.selections),
+        knowledge=knowledge,
+        graph=graph,
+        context_metadata={
+            "plan_source": plan.source,
+            "module_reasons": {item.module_id: item.reason for item in plan.selections},
+            **(metadata or {}),
+        },
+        assets=assets,
+    )
+    return ScanResult(
+        target=target,
+        assets=tuple((knowledge or KnowledgeStore()).assets) if knowledge is not None else assets,
+        findings=result.findings,
+        modules_run=tuple(item.module_id for item in result.executions if item.status == "completed"),
+        errors=result.errors,
+        knowledge=knowledge,
+    )
