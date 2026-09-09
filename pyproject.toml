@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phobos-ai-security"
-version = "0.7.0"
+version = "0.8.0"
 description = "AI-assisted web security scanner for AI-enabled applications"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -12,9 +12,11 @@ dependencies = []
 
 [project.optional-dependencies]
 browser = ["playwright==1.62.0"]
+desktop = ["pyside6==6.10.1", "pyinstaller>=6.22,<7"]
 
 [project.scripts]
 phobos = "cli:main"
+phobos-desktop = "desktop_app:main"
 
 [tool.setuptools]
 py-modules = [
@@ -23,6 +25,7 @@ py-modules = [
     "ai_setup",
     "ai_surface",
     "ai_testing",
+    "app_services",
     "assessment_engine",
     "browser_adapter",
     "browser_interaction",
@@ -31,6 +34,7 @@ py-modules = [
     "crawler",
     "cross_application",
     "cross_layer",
+    "desktop_app",
     "evidence",
     "graph",
     "knowledge_store",
