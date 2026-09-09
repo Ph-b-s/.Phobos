@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 from account_manager import AccountManager, AccountState
 from browser_interaction import BrowserInteractor, BrowserInteractionError
-from cross_application import ApplicationCandidate
+from cross_application import ApplicationCandidate, discover_related_applications
 
 MAX_WORKFLOW_STEPS = 64
 MAX_WORKFLOW_EVENTS = 256
@@ -117,7 +117,7 @@ class WorkflowEngine:
             try:
                 value = handler(context, step)
                 if value is not None:
-                    context.values[step.id] = value
+                    context.values[step.id] = _redact_value(value)
                 completed.append(step.id)
                 events.append(WorkflowEvent(step.id, "completed", _safe_url(context.target), step.description))
             except BrowserInteractionError as exc:
@@ -143,9 +143,10 @@ class WorkflowEngine:
         if len(ids) != len(steps):
             raise WorkflowError("workflow contains duplicate step ids")
         for index, step in enumerate(steps):
-            if set(step.depends_on) - ids:
-                raise WorkflowError(f"workflow step {step.id} depends on unknown steps")
-            if any(dependency == step.id for dependency in step.depends_on):
+            unknown = set(step.depends_on) - ids
+            if unknown:
+                raise WorkflowError(f"workflow step {step.id} depends on unknown steps: {', '.join(sorted(unknown))}")
+            if step.id in step.depends_on:
                 raise WorkflowError(f"workflow step {step.id} cannot depend on itself")
             prior = {candidate.id for candidate in steps[:index]}
             if not set(step.depends_on).issubset(prior):
@@ -162,8 +163,10 @@ class WorkflowEngine:
 def register_standard_actions(engine: WorkflowEngine) -> WorkflowEngine:
     engine.register_action("navigate", lambda context, step: context.browser.open(str(step.metadata["url"])))
     engine.register_action("fill", lambda context, step: context.browser.fill(str(step.metadata["selector"]), str(step.metadata["value"])))
+    engine.register_action("fill_account_field", _fill_account_field)
     engine.register_action("click", lambda context, step: context.browser.click(str(step.metadata["selector"])))
     engine.register_action("snapshot", lambda context, step: context.browser.snapshot_dict())
+    engine.register_action("discover_supporting_applications", _discover_supporting_applications)
     engine.register_action("create_account", _create_account)
     engine.register_action("mark_account_verified", _mark_account_verified)
     return engine
@@ -175,13 +178,43 @@ def _create_account(context: WorkflowContext, step: WorkflowStep) -> dict[str, A
         role=str(step.metadata.get("role", "user")),
         label=str(step.metadata.get("label", "test")),
     )
+    context.values[f"account:{account.id}"] = account.id
     return {"account_id": account.id, "credentials": account.to_dict()["credentials"]}
+
+
+def _fill_account_field(context: WorkflowContext, step: WorkflowStep) -> dict[str, str]:
+    account_id = str(step.metadata["account_id"])
+    field = str(step.metadata["field"]).strip().lower()
+    selectors = {"email": "email", "username": "username", "password": "password"}
+    if field not in selectors:
+        raise WorkflowError("account field must be email, username, or password")
+    account = context.accounts.get(account_id)
+    value = getattr(account.credentials, field)
+    context.browser.fill(str(step.metadata["selector"]), value)
+    return {"field": field, "selector": str(step.metadata["selector"]), "value": "<redacted>"}
+
+
+def _discover_supporting_applications(context: WorkflowContext, step: WorkflowStep) -> dict[str, Any]:
+    snapshot = context.browser.snapshot()
+    found = discover_related_applications(context.target, links=snapshot.links,
+                                          pages=({"url": snapshot.url, "text": snapshot.text},))
+    context.applications = tuple(dict.fromkeys((*context.applications, *found)))
+    return {"applications": [item.to_dict() for item in found]}
 
 
 def _mark_account_verified(context: WorkflowContext, step: WorkflowStep) -> dict[str, Any]:
     account_id = str(step.metadata["account_id"])
     context.accounts.set_state(account_id, AccountState.VERIFIED)
     return {"account_id": account_id, "state": AccountState.VERIFIED.value}
+
+
+def _redact_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {str(key): ("<redacted>" if str(key).casefold() in {"password", "token", "secret"} else _redact_value(item))
+                for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_redact_value(item) for item in value]
+    return value
 
 
 def _safe_url(url: str) -> str:
