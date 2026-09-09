@@ -173,11 +173,17 @@ def run_scan(args: argparse.Namespace) -> int:
         for page in recon.pages:
             graph.add_edge(source=website.id, target=page.id, relationship="hosts")
         assets = (website, *recon.assets)
+        browser_links: tuple[str, ...] = ()
+        browser_pages: tuple[dict[str, object], ...] = ()
+        if browser is not None:
+            snapshot = browser.snapshot()
+            browser_links = snapshot.links
+            browser_pages = ({"url": snapshot.url, "text": snapshot.text},)
         initial_paths = correlate_attack_paths(graph)
         related = discover_related_applications(
             config.target,
-            links=tuple(asset.url for asset in assets if asset.url),
-            pages=tuple({"url": asset.url, "text": asset.name} for asset in assets if asset.url),
+            links=tuple(dict.fromkeys((*[asset.url for asset in assets if asset.url], *browser_links))),
+            pages=browser_pages,
         )
         supporting_assets = merge_applications_into_graph(graph, website.id, related)
         if supporting_assets:
