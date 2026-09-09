@@ -3,11 +3,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from urllib.parse import urlparse
 
-from ai import AIConfig, AIError, VeniceClient
+from ai import AIConfig, AIError, LocalMistralClient
 from browser_adapter import BrowserAdapterError, BrowserLimits, PlaywrightBrowserSession
 from config import DEFAULT_USER_AGENT, PHOBOS_VERSION, ScanConfig
 from crawler import ReconCrawler
@@ -44,9 +43,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--nmap", action="store_true", help="enable the optional Nmap web-security module after the main assessment")
     scan.add_argument("--module", action="append", dest="modules", metavar="MODULE_ID", help="add a security module (repeatable)")
     scan.add_argument("--no-default-modules", action="store_true", help="disable the default baseline module plan")
-    scan.add_argument("--ai", action="store_true", help="use the Phobos AI planner to prioritize additional modules")
+    scan.add_argument("--ai", action="store_true", help="use the local Mistral security brain to prioritize additional modules")
 
-    agent = sub.add_parser("ai", help="ask the Phobos AI planner for a security-module plan")
+    agent = sub.add_parser("ai", help="ask the local Mistral security brain for a security-module plan")
     agent.add_argument("request", nargs="+", help="security-planning request")
     agent.add_argument("--target", required=True, help="explicit HTTP(S) target")
     agent.add_argument("--scope", action="append", dest="scopes", metavar="DOMAIN")
@@ -95,12 +94,12 @@ def run_modules(args: argparse.Namespace) -> int:
 def run_doctor(args: argparse.Namespace) -> int:
     checks: list[tuple[str, bool, str]] = []
     checks.append(("Python >= 3.11", sys.version_info >= (3, 11), _python_version()))
-    api_key_set = bool(os.environ.get("VENICE_API_KEY", "").strip())
-    checks.append(("VENICE_API_KEY set", api_key_set, "set" if api_key_set else "missing"))
     try:
         config = AIConfig.from_env()
-        checks.append(("AI endpoint uses HTTPS", True, config.base_url))
-        checks.append(("AI model configured", True, config.model))
+        checks.append(("AI backend", True, "local Mistral"))
+        checks.append(("AI endpoint", True, config.base_url))
+        checks.append(("AI model", True, config.model))
+        checks.append(("AI runtime", _runtime_available(config), "running" if _runtime_available(config) else "not running; Phobos can start it when needed"))
     except AIError as exc:
         checks.append(("AI configuration", False, str(exc)))
     ok = all(result for _, result, _ in checks)
@@ -112,6 +111,19 @@ def run_doctor(args: argparse.Namespace) -> int:
     return 0 if ok else 1
 
 
+def _runtime_available(config: AIConfig) -> bool:
+    """Probe the configured loopback AI endpoint without starting anything."""
+    from urllib.error import URLError
+    from urllib.request import Request, urlopen
+
+    health_url = config.base_url.rsplit("/api/", 1)[0] + "/api/version"
+    try:
+        with urlopen(Request(health_url, method="GET"), timeout=2.0):
+            return True
+    except (OSError, URLError):
+        return False
+
+
 def _python_version() -> str:
     return ".".join(str(part) for part in sys.version_info[:3])
 
@@ -121,7 +133,7 @@ def _build_plan(args: argparse.Namespace, context: str) -> ScanPlan:
     additions = [ModuleSelection(module_id, "explicit CLI selection") for module_id in (args.modules or ())]
 
     if args.ai:
-        decision = VeniceClient(AIConfig.from_env()).plan(context)
+        decision = LocalMistralClient(AIConfig.from_env()).plan(context)
         print(f"[PHOBOS AI] {decision['reason']}")
         additions.extend(ModuleSelection(module_id, "selected by Phobos AI") for module_id in decision["modules"])
         return validate_plan(merge_module_selections(plan, additions, source="ai"))
@@ -244,7 +256,7 @@ def run_ai(args: argparse.Namespace) -> int:
     try:
         validated = scope.validate(target)
         request = " ".join(args.request).strip()
-        decision = VeniceClient(AIConfig.from_env()).plan(f"Target: {validated}\nRequest: {request}")
+        decision = LocalMistralClient(AIConfig.from_env()).plan(f"Target: {validated}\nRequest: {request}")
         print(json.dumps(decision, indent=2))
         return 0
     except (AIError, ValueError) as exc:
