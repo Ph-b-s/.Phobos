@@ -18,8 +18,6 @@ MAX_FOLLOW_UPS_PER_RUN = 256
 
 @dataclass(frozen=True, slots=True)
 class ModuleResult:
-    """Structured output from one security module execution."""
-
     observations: tuple[SecurityObservation, ...] = ()
     findings: tuple[Finding, ...] = ()
     follow_ups: tuple[dict[str, Any], ...] = ()
@@ -34,8 +32,6 @@ class ModuleResult:
 
 @dataclass(frozen=True, slots=True)
 class ModuleExecution:
-    """Auditable outcome for a single module dispatch."""
-
     module_id: str
     status: str
     observations_added: int = 0
@@ -46,12 +42,11 @@ class ModuleExecution:
 
 @dataclass(frozen=True, slots=True)
 class ModuleRun:
-    """Complete bounded module-run result."""
-
     executions: tuple[ModuleExecution, ...]
     findings: tuple[Finding, ...]
     observations: tuple[SecurityObservation, ...]
     follow_ups: tuple[dict[str, Any], ...]
+    knowledge: KnowledgeStore
     errors: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
@@ -108,17 +103,8 @@ class ModuleRegistry:
     def ids(self) -> frozenset[str]:
         return frozenset(self._handlers)
 
-    def contains(self, module_id: str) -> bool:
-        return module_id in self._handlers
-
 
 def default_module_registry() -> ModuleRegistry:
-    """Return the built-in registry.
-
-    Cross-layer modules are deterministic correlation modules and are the first
-    modules with a production implementation. Web/AI vulnerability modules are
-    registered later as concrete procedures are completed.
-    """
     registry = ModuleRegistry()
     for module_id in (
         "cross_layer.web_to_ai",
@@ -135,8 +121,6 @@ def default_module_registry() -> ModuleRegistry:
 
 @dataclass(frozen=True, slots=True)
 class ModuleRunner:
-    """Execute a validated module plan against one shared knowledge store."""
-
     registry: ModuleRegistry
     max_modules: int = MAX_MODULES_PER_RUN
     max_follow_ups: int = MAX_FOLLOW_UPS_PER_RUN
@@ -161,7 +145,6 @@ class ModuleRunner:
         store = knowledge or KnowledgeStore()
         if assets:
             store.add_assets(assets)
-
         ids = tuple(dict.fromkeys(item.strip() for item in module_ids if item and item.strip()))
         if len(ids) > self.max_modules:
             raise ValueError(f"module run exceeds limit of {self.max_modules} modules")
@@ -184,7 +167,6 @@ class ModuleRunner:
             if not spec.active:
                 executions.append(ModuleExecution(module_id, "inactive"))
                 continue
-
             handler = self.registry.get(module_id)
             if handler is None:
                 message = f"security module is not implemented: {module_id}"
@@ -218,16 +200,13 @@ class ModuleRunner:
                 if len(result.follow_ups) > available:
                     raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
-
-                executions.append(
-                    ModuleExecution(
-                        module_id,
-                        "completed",
-                        sum(item.id not in before_observations for item in result.observations),
-                        sum(item.id not in before_findings for item in result.findings),
-                        len(result.follow_ups),
-                    )
-                )
+                executions.append(ModuleExecution(
+                    module_id,
+                    "completed",
+                    sum(item.id not in before_observations for item in result.observations),
+                    sum(item.id not in before_findings for item in result.findings),
+                    len(result.follow_ups),
+                ))
             except Exception as exc:
                 message = f"{module_id}: {type(exc).__name__}: {exc}"
                 if len(errors) < MAX_ERRORS_PER_RUN:
@@ -236,13 +215,7 @@ class ModuleRunner:
                 if self.stop_on_error:
                     break
 
-        return ModuleRun(
-            executions=tuple(executions),
-            findings=store.findings,
-            observations=store.observations,
-            follow_ups=tuple(all_follow_ups),
-            errors=tuple(errors[:MAX_ERRORS_PER_RUN]),
-        )
+        return ModuleRun(tuple(executions), store.findings, store.observations, tuple(all_follow_ups), store, tuple(errors[:MAX_ERRORS_PER_RUN]))
 
 
 def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
@@ -250,7 +223,7 @@ def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
         return ModuleResult()
     analysis = analyze_cross_layer(context.graph, context.store())
     module_id = str(context.metadata.get("module_id", ""))
-    selected = [item for item in analysis.follow_ups if item["module_id"] == module_id]
+    selected = tuple(item for item in analysis.follow_ups if item["module_id"] == module_id)
     observations = tuple(
         SecurityObservation(
             id=f"{module_id}:{item['correlation_id']}",
@@ -258,39 +231,32 @@ def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
             source=module_id,
             description=item["reason"],
             asset_ids=tuple(item["asset_ids"]),
-            data={
-                "correlation_id": item["correlation_id"],
-                "priority": item["priority"],
-            },
+            data={"correlation_id": item["correlation_id"], "priority": item["priority"]},
             confidence=float(item["priority"]),
         )
         for item in selected[:MAX_RESULT_ITEMS_PER_MODULE]
     )
-    follow_ups = tuple(item for item in analysis.follow_ups if item["module_id"] != module_id)
-    return ModuleResult(observations=observations, follow_ups=follow_ups[:MAX_FOLLOW_UPS_PER_RUN])
+    follow_ups = ()
+    if module_id == "cross_layer.attack_path":
+        follow_ups = analysis.follow_ups[:MAX_FOLLOW_UPS_PER_RUN]
+    return ModuleResult(observations=observations, follow_ups=follow_ups)
 
 
 def _validate_stage_order(module_ids: tuple[str, ...]) -> None:
     catalog = module_index()
+    order = {ModuleStage.WEB_AI: 0, ModuleStage.FOLLOW_UP: 1, ModuleStage.SUPPLEMENTAL: 2}
     last_stage = -1
-    order = {
-        ModuleStage.WEB_AI: 0,
-        ModuleStage.FOLLOW_UP: 1,
-        ModuleStage.SUPPLEMENTAL: 2,
-    }
     for module_id in module_ids:
-        if module_id not in catalog:
+        spec = catalog.get(module_id)
+        if spec is None:
             continue
-        stage = order[catalog[module_id].stage]
+        stage = order[spec.stage]
         if stage < last_stage:
             raise ValueError("module plan violates execution-stage ordering")
         last_stage = stage
 
 
-def _normalize_result(
-    value: ModuleResult | Iterable[SecurityObservation | Finding],
-    module_id: str,
-) -> ModuleResult:
+def _normalize_result(value: ModuleResult | Iterable[SecurityObservation | Finding], module_id: str) -> ModuleResult:
     if isinstance(value, ModuleResult):
         return value
     if isinstance(value, (str, bytes, bytearray)):
