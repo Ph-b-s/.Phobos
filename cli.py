@@ -21,10 +21,7 @@ from scope import ScopeValidator
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        prog="phobos",
-        description="Phobos — AI-assisted web security scanner for AI-enabled applications.",
-    )
+    parser = argparse.ArgumentParser(prog="phobos", description="Phobos — AI-assisted web security scanner for AI-enabled applications.")
     parser.add_argument("--version", action="version", version=f"Phobos {PHOBOS_VERSION}")
     sub = parser.add_subparsers(dest="command")
 
@@ -40,9 +37,9 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--browser", action="store_true", help="enable Playwright for JavaScript execution and dynamic Web reconnaissance")
     scan.add_argument("--browser-name", choices=("chromium", "firefox", "webkit"), default="chromium")
     scan.add_argument("--browser-max-requests", type=int, default=2_000)
-    scan.add_argument("--nmap", action="store_true", help="enable the optional Nmap web-security module after the main assessment")
+    scan.add_argument("--nmap", action="store_true", help="enable the optional Nmap web-security module")
     scan.add_argument("--module", action="append", dest="modules", metavar="MODULE_ID", help="add a security module (repeatable)")
-    scan.add_argument("--no-default-modules", action="store_true", help="disable the default baseline module plan")
+    scan.add_argument("--no-default-modules", action="store_true", help="disable the default module plan")
     scan.add_argument("--ai", action="store_true", help="use the local Mistral security brain to prioritize additional modules")
 
     agent = sub.add_parser("ai", help="ask the local Mistral security brain for a security-module plan")
@@ -53,7 +50,6 @@ def build_parser() -> argparse.ArgumentParser:
 
     modules = sub.add_parser("modules", help="list the Phobos vulnerability-module catalog")
     modules.add_argument("--json", action="store_true")
-
     doctor = sub.add_parser("doctor", help="check the local Phobos environment")
     doctor.add_argument("--quiet", action="store_true", help="only return the diagnostic exit code")
     return parser
@@ -67,19 +63,9 @@ def _target_url(target: str) -> str:
 
 
 def run_modules(args: argparse.Namespace) -> int:
-    rows = [
-        {
-            "id": item.id,
-            "name": item.name,
-            "domain": item.domain.value,
-            "stage": item.stage.value,
-            "active": item.active,
-            "implemented": item.implemented,
-            "tool": item.tool,
-            "description": item.description,
-        }
-        for item in module_index().values()
-    ]
+    rows = [{"id": item.id, "name": item.name, "domain": item.domain.value, "stage": item.stage.value,
+             "active": item.active, "implemented": item.implemented, "tool": item.tool, "description": item.description}
+            for item in module_index().values()]
     if args.json:
         print(json.dumps(rows, indent=2))
         return 0
@@ -92,15 +78,13 @@ def run_modules(args: argparse.Namespace) -> int:
 
 
 def run_doctor(args: argparse.Namespace) -> int:
-    checks: list[tuple[str, bool, str]] = []
-    checks.append(("Python >= 3.11", sys.version_info >= (3, 11), _python_version()))
+    checks: list[tuple[str, bool, str]] = [("Python >= 3.11", sys.version_info >= (3, 11), _python_version())]
     try:
         config = AIConfig.from_env()
         runtime = _runtime_available(config)
-        checks.append(("AI backend", True, "local Mistral"))
-        checks.append(("AI endpoint", True, config.base_url))
-        checks.append(("AI model", True, config.model))
-        checks.append(("AI runtime", runtime, "running" if runtime else "not running; Phobos can start it when needed"))
+        checks.extend((("AI backend", True, "local Mistral"), ("AI endpoint", True, config.base_url),
+                       ("AI model", True, config.model), ("AI runtime", runtime,
+                        "running" if runtime else "not running; Phobos can start it when needed")))
     except AIError as exc:
         checks.append(("AI configuration", False, str(exc)))
     ok = all(result for _, result, _ in checks)
@@ -115,7 +99,6 @@ def run_doctor(args: argparse.Namespace) -> int:
 def _runtime_available(config: AIConfig) -> bool:
     from urllib.error import URLError
     from urllib.request import Request, urlopen
-
     health_url = config.base_url.rsplit("/api/", 1)[0] + "/api/version"
     try:
         with urlopen(Request(health_url, method="GET"), timeout=2.0):
@@ -140,24 +123,16 @@ def _build_plan(args: argparse.Namespace, context: str) -> ScanPlan:
 
 
 def _attack_path_dict(path: AttackPath) -> dict:
-    return {
-        "id": path.id,
-        "nodes": list(path.nodes),
-        "relationships": list(path.relationships),
-        "pattern": path.pattern,
-        "confidence": path.confidence,
-        "rationale": path.rationale,
-        "metadata": path.metadata,
-    }
+    return {"id": path.id, "nodes": list(path.nodes), "relationships": list(path.relationships),
+            "pattern": path.pattern, "confidence": path.confidence, "rationale": path.rationale,
+            "metadata": path.metadata}
 
 
 def run_scan(args: argparse.Namespace) -> int:
-    config = ScanConfig.from_cli(
-        _target_url(args.target), tuple(args.scopes or ()), args.output,
-        timeout=args.timeout, max_pages=args.max_pages,
-        max_discovered_urls=args.max_discovered_urls, user_agent=args.user_agent,
-        allow_private_targets=args.allow_private_targets,
-    )
+    config = ScanConfig.from_cli(_target_url(args.target), tuple(args.scopes or ()), args.output,
+                                 timeout=args.timeout, max_pages=args.max_pages,
+                                 max_discovered_urls=args.max_discovered_urls, user_agent=args.user_agent,
+                                 allow_private_targets=args.allow_private_targets)
     scope = ScopeValidator(config.normalized_scopes, allow_private_targets=config.allow_private_targets)
     manager = RequestManager(scope, timeout=config.timeout, max_redirects=config.max_redirects,
                              user_agent=config.user_agent, max_response_bytes=config.max_response_bytes)
@@ -172,28 +147,22 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"  Target: {config.target}")
     print(f"  Scope:  {', '.join(scope.allowed_domains)}")
     print(f"  Web runtime: {'browser/JavaScript' if args.browser else 'static HTTP'}")
-
     try:
         if args.browser:
-            browser = PlaywrightBrowserSession(
-                scope,
-                limits=BrowserLimits(max_requests=args.browser_max_requests, navigation_timeout_ms=int(config.timeout * 1000)),
-                browser_name=args.browser_name,
-                user_agent=config.user_agent,
-            )
+            browser = PlaywrightBrowserSession(scope,
+                limits=BrowserLimits(max_requests=args.browser_max_requests,
+                                     navigation_timeout_ms=int(config.timeout * 1000)),
+                browser_name=args.browser_name, user_agent=config.user_agent)
         recon = ReconCrawler(manager, max_pages=config.max_pages,
                              max_discovered_urls=config.max_discovered_urls, browser=browser).crawl(config.target, graph=graph)
         for page in recon.pages:
             graph.add_edge(source=website.id, target=page.id, relationship="hosts")
         assets = (website, *recon.assets)
         initial_paths = correlate_attack_paths(graph)
-        context_payload = {
-            "target": config.target,
-            "assets": [asset.to_dict() for asset in assets[:500]],
-            "cross_layer_attack_paths": [_attack_path_dict(path) for path in initial_paths[:100]],
-            "browser_enabled": args.browser,
-        }
-        plan = _build_plan(args, json.dumps(context_payload, ensure_ascii=False))
+        context = json.dumps({"target": config.target, "assets": [a.to_dict() for a in assets[:500]],
+                              "cross_layer_attack_paths": [_attack_path_dict(p) for p in initial_paths[:100]],
+                              "browser_enabled": args.browser}, ensure_ascii=False)
+        plan = _build_plan(args, context)
     except (RequestError, AIError, BrowserAdapterError, ValueError) as exc:
         output.write_json("scan.json", {"schema_version": "1.0", "target": config.target, "status": "failed", "error": str(exc)})
         output.write_json("graph.json", graph.to_dict())
@@ -212,57 +181,23 @@ def run_scan(args: argparse.Namespace) -> int:
         print(f"✗ Module execution stopped: {exc}", file=sys.stderr)
         return 2
 
-    output.write_json("scan.json", {
-        "schema_version": "1.0",
-        "target": config.target,
-        "scopes": list(scope.allowed_domains),
-        "status": "assessment_complete",
-        "summary": {
-            "pages": len(recon.pages),
-            "forms": len(recon.forms),
-            "inputs": len(recon.inputs),
-            "endpoints": len(recon.endpoints),
-            "javascript_files": len(recon.javascript),
-            "ai_surfaces": len(recon.ai_surfaces),
-            "browser_observations": len(recon.browser_observations),
-            "cross_layer_paths": len(analysis.attack_paths),
-            "cross_layer_correlations": len(analysis.correlations),
-            "modules_completed": len(scan.modules_run),
-            "module_errors": len(scan.errors),
-            "findings": len(scan.findings),
-        },
-        "plan": {"source": plan.source, "modules": [item.module_id for item in plan.selections]},
-    })
+    output.write_json("scan.json", {"schema_version": "1.0", "target": config.target,
+        "scopes": list(scope.allowed_domains), "status": "assessment_complete",
+        "summary": {"pages": len(recon.pages), "forms": len(recon.forms), "inputs": len(recon.inputs),
+                    "endpoints": len(recon.endpoints), "javascript_files": len(recon.javascript),
+                    "ai_surfaces": len(recon.ai_surfaces), "browser_observations": len(recon.browser_observations),
+                    "cross_layer_paths": len(analysis.attack_paths), "cross_layer_correlations": len(analysis.correlations),
+                    "modules_completed": len(scan.modules_run), "module_errors": len(scan.errors), "findings": len(scan.findings)},
+        "plan": {"source": plan.source, "modules": [item.module_id for item in plan.selections]}})
     output.write_json("assets.json", [asset.to_dict() for asset in scan.assets])
     output.write_json("graph.json", graph.to_dict())
     output.write_json("cross_layer.json", analysis.to_dict())
-    output.write_json("module_run.json", {
-        "executions": [
-            {
-                "module_id": item.module_id,
-                "status": item.status,
-                "observations_added": item.observations_added,
-                "findings_added": item.findings_added,
-                "follow_ups_added": item.follow_ups_added,
-                "error": item.error,
-            }
-            for item in tuple(scan.knowledge.events)
-            if item.get("type") == "module_execution"
-        ],
-        "modules_run": list(scan.modules_run),
-        "errors": list(scan.errors),
-    })
+    output.write_json("module_run.json", scan.module_run.to_dict())
     output.write_json("knowledge.json", scan.knowledge.to_dict())
     output.write_json("findings.json", [finding.to_dict() for finding in scan.findings])
-    output.write_json("browser_observations.json", [
-        {
-            "kind": getattr(item, "kind", ""),
-            "description": getattr(item, "description", ""),
-            "source": getattr(item, "source", ""),
-            "metadata": getattr(item, "metadata", {}),
-        }
-        for item in recon.browser_observations
-    ])
+    output.write_json("browser_observations.json", [{"kind": getattr(item, "kind", ""),
+        "description": getattr(item, "description", ""), "source": getattr(item, "source", ""),
+        "metadata": getattr(item, "metadata", {})} for item in recon.browser_observations])
 
     print(f"✓ {len(recon.pages)} pages discovered")
     print(f"✓ {len(recon.endpoints)} endpoints discovered")
@@ -275,7 +210,7 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"✓ {len(analysis.correlations)} cross-layer evidence correlations")
     print(f"✓ {len(scan.modules_run)} modules executed")
     if scan.errors:
-        print(f"⚠ {len(scan.errors)} modules could not execute yet")
+        print(f"⚠ {len(scan.errors)} modules are not implemented yet")
     print(f"✓ {len(scan.findings)} findings recorded")
     print(f"\nResults saved to {config.output_dir}")
     return 0 if not scan.errors else 1
