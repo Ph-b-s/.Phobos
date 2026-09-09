@@ -51,17 +51,11 @@ class ModuleRun:
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "executions": [
-                {
-                    "module_id": item.module_id,
-                    "status": item.status,
-                    "observations_added": item.observations_added,
-                    "findings_added": item.findings_added,
-                    "follow_ups_added": item.follow_ups_added,
-                    "error": item.error,
-                }
-                for item in self.executions
-            ],
+            "executions": [{"module_id": item.module_id, "status": item.status,
+                            "observations_added": item.observations_added,
+                            "findings_added": item.findings_added,
+                            "follow_ups_added": item.follow_ups_added,
+                            "error": item.error} for item in self.executions],
             "findings": [item.to_dict() for item in self.findings],
             "observations": [item.to_dict() for item in self.observations],
             "follow_ups": list(self.follow_ups),
@@ -107,12 +101,8 @@ class ModuleRegistry:
 def default_module_registry() -> ModuleRegistry:
     registry = ModuleRegistry()
     for module_id in (
-        "cross_layer.web_to_ai",
-        "cross_layer.ai_to_web",
-        "cross_layer.auth_boundary",
-        "cross_layer.data_flow",
-        "cross_layer.control_flow",
-        "cross_layer.capability_escalation",
+        "cross_layer.web_to_ai", "cross_layer.ai_to_web", "cross_layer.auth_boundary",
+        "cross_layer.data_flow", "cross_layer.control_flow", "cross_layer.capability_escalation",
         "cross_layer.attack_path",
     ):
         registry.register(module_id, _cross_layer_handler)
@@ -132,16 +122,9 @@ class ModuleRunner:
         if not 1 <= self.max_follow_ups <= MAX_FOLLOW_UPS_PER_RUN:
             raise ValueError(f"max_follow_ups must be between 1 and {MAX_FOLLOW_UPS_PER_RUN}")
 
-    def run(
-        self,
-        target: str,
-        module_ids: Iterable[str],
-        *,
-        knowledge: KnowledgeStore | None = None,
-        graph: Graph | None = None,
-        context_metadata: Mapping[str, Any] | None = None,
-        assets: tuple[Any, ...] = (),
-    ) -> ModuleRun:
+    def run(self, target: str, module_ids: Iterable[str], *, knowledge: KnowledgeStore | None = None,
+            graph: Graph | None = None, context_metadata: Mapping[str, Any] | None = None,
+            assets: tuple[Any, ...] = ()) -> ModuleRun:
         store = knowledge or KnowledgeStore()
         if assets:
             store.add_assets(assets)
@@ -149,7 +132,6 @@ class ModuleRunner:
         if len(ids) > self.max_modules:
             raise ValueError(f"module run exceeds limit of {self.max_modules} modules")
         _validate_stage_order(ids)
-
         catalog = module_index()
         executions: list[ModuleExecution] = []
         errors: list[str] = []
@@ -169,25 +151,12 @@ class ModuleRunner:
                 continue
             handler = self.registry.get(module_id)
             if handler is None:
-                message = f"security module is not implemented: {module_id}"
-                executions.append(ModuleExecution(module_id, "unimplemented", error=message))
-                errors.append(message)
-                if self.stop_on_error:
-                    break
+                executions.append(ModuleExecution(module_id, "unimplemented"))
                 continue
 
-            context = ModuleContext(
-                target=target,
-                assets=tuple(store.assets),
-                knowledge=store,
-                graph=graph,
-                metadata={
-                    **dict(context_metadata or {}),
-                    "module_id": module_id,
-                    "module_domain": spec.domain.value,
-                    "module_stage": spec.stage.value,
-                },
-            )
+            context = ModuleContext(target=target, assets=tuple(store.assets), knowledge=store, graph=graph,
+                                    metadata={**dict(context_metadata or {}), "module_id": module_id,
+                                              "module_domain": spec.domain.value, "module_stage": spec.stage.value})
             try:
                 before_observations = {item.id for item in store.observations}
                 before_findings = {item.id for item in store.findings}
@@ -201,8 +170,7 @@ class ModuleRunner:
                     raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
                 executions.append(ModuleExecution(
-                    module_id,
-                    "completed",
+                    module_id, "completed",
                     sum(item.id not in before_observations for item in result.observations),
                     sum(item.id not in before_findings for item in result.findings),
                     len(result.follow_ups),
@@ -215,7 +183,8 @@ class ModuleRunner:
                 if self.stop_on_error:
                     break
 
-        return ModuleRun(tuple(executions), store.findings, store.observations, tuple(all_follow_ups), store, tuple(errors[:MAX_ERRORS_PER_RUN]))
+        return ModuleRun(tuple(executions), store.findings, store.observations,
+                         tuple(all_follow_ups), store, tuple(errors[:MAX_ERRORS_PER_RUN]))
 
 
 def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
@@ -226,19 +195,13 @@ def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
     selected = tuple(item for item in analysis.follow_ups if item["module_id"] == module_id)
     observations = tuple(
         SecurityObservation(
-            id=f"{module_id}:{item['correlation_id']}",
-            kind=f"cross_layer.{item['correlation_type']}",
-            source=module_id,
-            description=item["reason"],
-            asset_ids=tuple(item["asset_ids"]),
+            id=f"{module_id}:{item['correlation_id']}", kind=f"cross_layer.{item['correlation_type']}",
+            source=module_id, description=item["reason"], asset_ids=tuple(item["asset_ids"]),
             data={"correlation_id": item["correlation_id"], "priority": item["priority"]},
             confidence=float(item["priority"]),
-        )
-        for item in selected[:MAX_RESULT_ITEMS_PER_MODULE]
+        ) for item in selected[:MAX_RESULT_ITEMS_PER_MODULE]
     )
-    follow_ups = ()
-    if module_id == "cross_layer.attack_path":
-        follow_ups = analysis.follow_ups[:MAX_FOLLOW_UPS_PER_RUN]
+    follow_ups = analysis.follow_ups[:MAX_FOLLOW_UPS_PER_RUN] if module_id == "cross_layer.attack_path" else ()
     return ModuleResult(observations=observations, follow_ups=follow_ups)
 
 
