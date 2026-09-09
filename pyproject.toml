@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "phobos-ai-security"
-version = "0.5.0"
+version = "0.6.0"
 description = "AI-assisted web security scanner for AI-enabled applications"
 requires-python = ">=3.11"
 readme = "README.md"
@@ -19,6 +19,7 @@ phobos = "cli:main"
 [tool.setuptools]
 py-modules = [
     "ai",
+    "ai_setup",
     "ai_surface",
     "ai_testing",
     "assessment_engine",
@@ -34,6 +35,7 @@ py-modules = [
     "nodes",
     "nmap_runner",
     "request_manager",
+    "scanner",
     "scope",
     "security_modules",
     "web_surface",
