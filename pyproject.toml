@@ -13,6 +13,7 @@ dependencies = []
 [project.optional-dependencies]
 browser = ["playwright==1.62.0"]
 desktop = ["pyside6==6.10.1", "pyinstaller>=6.22,<7"]
+dev = ["pytest>=8,<9"]
 
 [project.scripts]
 phobos = "cli:main"
