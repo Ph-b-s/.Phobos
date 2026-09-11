@@ -11,8 +11,8 @@ from models import AssetType, Finding
 MAX_ASSETS = 96
 MAX_SIGNALS_PER_ASSET = 12
 
-_SSRF_NAMES = re.compile(r"(?:^|[-_])(url|uri|href|src|callback|webhook|redirect|return|next|image|fetch|proxy)(?:$|[-_])", re.I)
-_COMMAND_NAMES = re.compile(r"(?:^|[-_])(cmd|command|exec|execute|shell|script|ping|host)(?:$|[-_])", re.I)
+_SSRF_NAMES = re.compile(r"(?<![a-z0-9])(?:url|uri|href|src|callback|webhook|redirect|return|next|image|fetch|proxy)(?![a-z0-9])", re.I)
+_COMMAND_NAMES = re.compile(r"(?<![a-z0-9])(?:cmd|command|exec|execute|shell|script|ping|host)(?![a-z0-9])", re.I)
 _XML_HINTS = re.compile(r"(?:application/xml|text/xml|xmlrpc|soap|xsd|xmlns|<\?xml)", re.I)
 _SERIALIZATION_HINTS = re.compile(r"(?:pickle|deserialize|serialization|serialized|marshal|yaml|objectinputstream|base64)(?:[^a-z]|$)", re.I)
 _BUSINESS_HINTS = re.compile(r"(?:checkout|purchase|transfer|withdraw|redeem|coupon|invite|role|permission|approval|refund|reset|change[-_ ]email|change[-_ ]password)", re.I)
@@ -51,7 +51,10 @@ def _input_names(asset) -> tuple[str, ...]:
         values = ()
     result: list[str] = []
     for value in values:
-        name = value.get("name") or value.get("id") or "" if isinstance(value, dict) else value
+        if isinstance(value, dict):
+            name = value.get("name") or value.get("id") or ""
+        else:
+            name = value
         name = str(name).strip()
         if name and name not in result:
             result.append(name)
