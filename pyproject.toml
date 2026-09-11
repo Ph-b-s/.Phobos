@@ -36,6 +36,7 @@ py-modules = [
     "browser_interaction",
     "cli",
     "config",
+    "coverage_modules",
     "crawler",
     "cross_application",
     "cross_layer",
