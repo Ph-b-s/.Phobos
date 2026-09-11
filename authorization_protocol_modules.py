@@ -15,8 +15,10 @@ from workflow_engine import WorkflowContext, WorkflowEngine, WorkflowStep, Workf
 MAX_PAIRS = 24
 MAX_STEPS = 24
 MAX_GRAPHQL_ENDPOINTS = 8
+MAX_WEBSOCKET_ENDPOINTS = 8
 MAX_QUERY_CHARS = 8_000
 MAX_BODY_CHARS = 160_000
+MAX_WEBSOCKET_PROTOCOLS = 8
 
 
 def _id(prefix: str, value: str) -> str:
@@ -194,9 +196,91 @@ def _run_graphql_auth_comparison(context: ModuleContext, config: Any) -> ModuleR
     return ModuleResult(observations=tuple(observations), findings=tuple(findings))
 
 
-def run_web_websocket_auth_surface(context: ModuleContext):
-    """Identify WebSocket authentication signals without opening a socket or sending messages."""
+def _websocket_endpoints(config: Mapping[str, Any]) -> tuple[str, ...]:
+    raw = config.get("endpoints", ())
+    if not isinstance(raw, (list, tuple)):
+        raise TypeError("websocket_auth.endpoints must be a list")
+    endpoints = []
+    for value in raw:
+        url = str(value).strip()
+        if not url:
+            continue
+        parsed = urlsplit(url)
+        if parsed.scheme.lower() not in {"ws", "wss"} or not parsed.netloc:
+            raise ValueError("websocket_auth endpoints must be ws:// or wss:// URLs")
+        if url not in endpoints:
+            endpoints.append(url)
+        if len(endpoints) >= MAX_WEBSOCKET_ENDPOINTS:
+            break
+    if not endpoints:
+        raise ValueError("websocket_auth.endpoints must contain at least one endpoint")
+    return tuple(endpoints)
+
+
+def _run_websocket_auth_comparison(context: ModuleContext, config: Any) -> ModuleResult:
     from module_runner import ModuleResult
+    if not isinstance(config, Mapping):
+        raise TypeError("websocket_auth must be an object")
+    if context.interactor is None or not callable(getattr(context.interactor, "websocket_handshake", None)):
+        raise RuntimeError("web.websocket_auth_surface requires an interactor with handshake capability")
+    endpoints = _websocket_endpoints(config)
+    low_headers = _graphql_headers(config.get("low_headers"), "low_headers")
+    high_headers = _graphql_headers(config.get("high_headers"), "high_headers")
+    raw_protocols = config.get("protocols", ())
+    if not isinstance(raw_protocols, (list, tuple)) or len(raw_protocols) > MAX_WEBSOCKET_PROTOCOLS:
+        raise ValueError("websocket_auth.protocols must be a bounded list")
+    protocols = tuple(str(item).strip() for item in raw_protocols if str(item).strip())
+    if any(len(item) > 256 for item in protocols):
+        raise ValueError("WebSocket subprotocol exceeds size limit")
+
+    observations = []
+    findings = []
+    for index, url in enumerate(endpoints):
+        low = context.interactor.websocket_handshake(url, headers=low_headers, protocols=protocols)
+        high = context.interactor.websocket_handshake(url, headers=high_headers, protocols=protocols)
+        low_state = str(low.get("state", "error"))
+        high_state = str(high.get("state", "error"))
+        unauthorized_low = low_state != "open"
+        same_authenticated_outcome = low_state == "open" and high_state == "open"
+        oid = _id("web.websocket_auth.comparison", f"{url}:{index}:{protocols}")
+        observations.append(SecurityObservation(
+            id=oid,
+            kind="web.websocket.authorization_comparison",
+            source="web.websocket_auth_surface",
+            description="Configured low/high WebSocket handshakes compared without sending application messages",
+            data={
+                "url": _safe_url(url),
+                "low_state": low_state,
+                "high_state": high_state,
+                "low_rejected": unauthorized_low,
+                "both_handshakes_open": same_authenticated_outcome,
+                "protocol_count": len(protocols),
+            },
+            confidence=0.94,
+        ))
+        if same_authenticated_outcome:
+            findings.append(Finding(
+                id=_id("web.websocket_auth.finding", f"{url}:{index}"),
+                type="potential_websocket_authorization_failure",
+                confidence=0.78,
+                evidence=(oid,),
+                metadata={
+                    "severity": "high",
+                    "url": _safe_url(url),
+                    "validation": "low-privilege and high-privilege WebSocket handshakes both completed",
+                    "status": "needs_message_level_context_confirmation",
+                },
+            ))
+    return ModuleResult(observations=tuple(observations), findings=tuple(findings))
+
+
+def run_web_websocket_auth_surface(context: ModuleContext):
+    """Inventory WebSocket auth signals or run a configured handshake-only role comparison."""
+    from module_runner import ModuleResult
+    config = context.metadata.get("websocket_auth")
+    if config is not None:
+        return _run_websocket_auth_comparison(context, config)
+
     auth = re.compile(r"(?:auth|authorization|bearer|cookie|session|token|subprotocol|origin|csrf)", re.I)
     observations = []
     findings = []
