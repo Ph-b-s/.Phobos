@@ -132,6 +132,7 @@ def default_module_registry() -> ModuleRegistry:
     from nosql_module import run_web_nosql
     from ai_security_modules import run_ai_prompt_injection, run_ai_system_prompt
     from ai_data_module import run_ai_data_disclosure
+    from ai_boundary_modules import run_ai_output_handling, run_ai_goal_hijacking, run_ai_context_manipulation
 
     registry.register("web.headers", run_web_headers)
     registry.register("web.cookies", run_web_cookies)
@@ -161,6 +162,9 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
     registry.register("ai.system_prompt", run_ai_system_prompt)
     registry.register("ai.data_disclosure", run_ai_data_disclosure)
+    registry.register("ai.output_handling", run_ai_output_handling)
+    registry.register("ai.goal_hijacking", run_ai_goal_hijacking)
+    registry.register("ai.context_manipulation", run_ai_context_manipulation)
     return registry
 
 
