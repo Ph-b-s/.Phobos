@@ -1,8 +1,11 @@
 """Bounded authorization-focused modules for API, WebSocket, and object flows."""
 from __future__ import annotations
 
+import json
+import re
 from hashlib import sha256
 from typing import Any, Mapping
+from urllib.parse import urlsplit, urlunsplit
 
 from knowledge_store import SecurityObservation
 from models import AssetType, Finding
@@ -11,6 +14,9 @@ from workflow_engine import WorkflowContext, WorkflowEngine, WorkflowStep, Workf
 
 MAX_PAIRS = 24
 MAX_STEPS = 24
+MAX_GRAPHQL_ENDPOINTS = 8
+MAX_QUERY_CHARS = 8_000
+MAX_BODY_CHARS = 160_000
 
 
 def _id(prefix: str, value: str) -> str:
@@ -23,7 +29,6 @@ def _digest(text: str) -> str:
 
 
 def _safe_url(url: str) -> str:
-    from urllib.parse import urlsplit, urlunsplit
     parsed = urlsplit(url)
     return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", "", ""))
 
@@ -80,14 +85,12 @@ def run_web_object_authorization(context: ModuleContext):
         peer = str(pair.get("peer_url", "")).strip()
         if not owned or not peer:
             raise ValueError("object_authorization pairs require owned_url and peer_url")
-        first = context.interactor.open(owned)
+        context.interactor.open(owned)
         first_snapshot = context.interactor.snapshot()
-        second = context.interactor.open(peer)
+        context.interactor.open(peer)
         second_snapshot = context.interactor.snapshot()
-        same_signature = (
-            _digest(first_snapshot.text) == _digest(second_snapshot.text)
-            and len(first_snapshot.text) == len(second_snapshot.text)
-        )
+        same_signature = (_digest(first_snapshot.text) == _digest(second_snapshot.text)
+                          and len(first_snapshot.text) == len(second_snapshot.text))
         oid = _id("web.object_authorization.observation", f"{owned}|{peer}")
         observations.append(SecurityObservation(
             id=oid, kind="web.object_authorization.object_pair", source="web.object_authorization",
@@ -105,9 +108,12 @@ def run_web_object_authorization(context: ModuleContext):
 
 
 def run_web_graphql_auth_surface(context: ModuleContext):
-    """Identify GraphQL auth-sensitive fields/routes for later configured validation."""
+    """Identify GraphQL auth-sensitive fields and optionally run a configured read-only role comparison."""
     from module_runner import ModuleResult
-    import re
+    config = context.metadata.get("graphql_auth")
+    if config is not None:
+        return _run_graphql_auth_comparison(context, config)
+
     pattern = re.compile(r"(?:viewer|user|account|tenant|role|admin|permission|owner|organization|private|secret)", re.I)
     observations = []
     findings = []
@@ -130,10 +136,67 @@ def run_web_graphql_auth_surface(context: ModuleContext):
     return ModuleResult(observations=tuple(observations), findings=tuple(findings))
 
 
+def _graphql_headers(raw: Any, label: str) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, Mapping):
+        raise TypeError(f"{label} must be an object")
+    result = {}
+    for key, value in raw.items():
+        name = str(key).strip()
+        if not name or len(name) > 128:
+            raise ValueError(f"{label} contains an invalid header name")
+        result[name] = str(value)[:8_000]
+    return result
+
+
+def _run_graphql_auth_comparison(context: ModuleContext, config: Any) -> ModuleResult:
+    from module_runner import ModuleResult
+    if not isinstance(config, Mapping):
+        raise TypeError("graphql_auth must be an object")
+    requests = context.metadata.get("request_manager")
+    if requests is None:
+        raise RuntimeError("web.graphql_auth_surface requires request_manager for configured active validation")
+    endpoints = tuple(dict.fromkeys(str(url).strip() for url in config.get("endpoints", ()) if str(url).strip()))[:MAX_GRAPHQL_ENDPOINTS]
+    if not endpoints:
+        raise ValueError("graphql_auth.endpoints must contain at least one endpoint")
+    query = str(config.get("query", "")).strip()
+    if not query or len(query) > MAX_QUERY_CHARS:
+        raise ValueError("graphql_auth.query must be non-empty and within the query limit")
+    if any(token in query.casefold() for token in ("mutation", "subscription")):
+        raise ValueError("graphql_auth.query must be read-only; mutations and subscriptions are not allowed")
+    low_headers = _graphql_headers(config.get("low_headers"), "low_headers")
+    high_headers = _graphql_headers(config.get("high_headers"), "high_headers")
+    body = json.dumps({"query": query}, separators=(",", ":")).encode("utf-8")
+    observations = []
+    findings = []
+    for index, url in enumerate(endpoints):
+        low = requests.request("POST", url, headers={**low_headers, "Content-Type": "application/json", "Accept": "application/json"}, body=body)
+        high = requests.request("POST", url, headers={**high_headers, "Content-Type": "application/json", "Accept": "application/json"}, body=body)
+        low_text, high_text = low.text[:MAX_BODY_CHARS], high.text[:MAX_BODY_CHARS]
+        same = low.status == high.status and _digest(low_text) == _digest(high_text) and len(low_text) == len(high_text)
+        oid = _id("web.graphql_auth.comparison", f"{url}:{query}")
+        observations.append(SecurityObservation(
+            id=oid, kind="web.graphql.authorization_comparison", source="web.graphql_auth_surface",
+            description="Configured low/high GraphQL role requests compared with a read-only query",
+            data={"url": _safe_url(url),
+                  "low": {"status": low.status, "body_digest": _digest(low_text), "body_length": len(low_text)},
+                  "high": {"status": high.status, "body_digest": _digest(high_text), "body_length": len(high_text)},
+                  "same_response_signature": same}, confidence=0.94,
+        ))
+        if same:
+            findings.append(Finding(
+                id=_id("web.graphql_auth.finding", f"{url}:{index}"), type="potential_graphql_authorization_failure",
+                confidence=0.77, evidence=(oid,), metadata={"severity": "high", "url": _safe_url(url),
+                "validation": "low/high GraphQL role requests returned identical normalized signatures",
+                "status": "needs_context_confirmation"},
+            ))
+    return ModuleResult(observations=tuple(observations), findings=tuple(findings))
+
+
 def run_web_websocket_auth_surface(context: ModuleContext):
     """Identify WebSocket authentication signals without opening a socket or sending messages."""
     from module_runner import ModuleResult
-    import re
     auth = re.compile(r"(?:auth|authorization|bearer|cookie|session|token|subprotocol|origin|csrf)", re.I)
     observations = []
     findings = []
@@ -162,7 +225,6 @@ def run_web_websocket_auth_surface(context: ModuleContext):
 def run_ai_tool_rag_bridge(context: ModuleContext):
     """Connect AI tool and RAG surfaces when their descriptors share meaningful identifiers."""
     from module_runner import ModuleResult
-    import re
     ai = [asset for asset in context.assets if asset.type in {AssetType.AI_AGENT, AssetType.TOOL, AssetType.RESOURCE, AssetType.API}]
     tools = [asset for asset in ai if re.search(r"tool|function|plugin|action|connector", f"{asset.name} {asset.metadata}", re.I)]
     rag = [asset for asset in ai if re.search(r"rag|retriev|vector|embedding|document|knowledge", f"{asset.name} {asset.metadata}", re.I)]
