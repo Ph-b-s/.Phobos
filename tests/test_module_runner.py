@@ -20,12 +20,13 @@ def test_default_registry_matches_active_implemented_catalog():
     assert registry.ids() == expected
 
 
-def test_active_unregistered_module_is_reported_as_unimplemented():
+def test_configured_module_without_configuration_fails_cleanly():
     run = ModuleRunner(default_module_registry()).run(
         "https://example.com",
         ["web.access_control"],
     )
-    assert run.executions[0].status == "completed" or run.executions[0].status == "error"
+    assert run.executions[0].status == "error"
+    assert "configuration" in run.errors[0]
 
 
 def test_unimplemented_module_is_not_executed():
