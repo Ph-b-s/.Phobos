@@ -106,6 +106,11 @@ def default_module_registry() -> ModuleRegistry:
         "cross_layer.attack_path",
     ):
         registry.register(module_id, _cross_layer_handler)
+
+    from module_adapters import run_indirect_prompt_injection_module, run_nmap_module
+
+    registry.register("web.nmap", run_nmap_module)
+    registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
     return registry
 
 
@@ -159,7 +164,8 @@ class ModuleRunner:
                                     browser=caps.get("browser"), interactor=caps.get("interactor"),
                                     accounts=caps.get("accounts"), workflow=caps.get("workflow"),
                                     applications=tuple(caps.get("applications", ())),
-                                    metadata={**dict(context_metadata or {}), "module_id": module_id,
+                                    metadata={**dict(context_metadata or {}), **dict(caps.get("metadata", {})),
+                                              "module_id": module_id,
                                               "module_domain": spec.domain.value, "module_stage": spec.stage.value})
             try:
                 before_observations = {item.id for item in store.observations}
