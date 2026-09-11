@@ -56,6 +56,7 @@ py-modules = [
     "security_modules",
     "standard_modules",
     "summarizer",
+    "template_module",
     "web_analysis_modules",
     "web_surface",
     "workflow_engine",
