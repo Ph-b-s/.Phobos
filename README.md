@@ -44,9 +44,9 @@ The AI inside Phobos is the **security brain**. It does not replace scanners and
                     │                 │                 │
                     ▼                 ▼                 ▼
                 WEB MODULES       AI MODULES      CROSS-LAYER
+                    │                 │           Web ↔ AI
+          HTTP + Browser JS      LLM / Agent       correlation
                     │                 │                 │
-          HTTP + Browser JS      LLM / Agent       Web ↔ AI
-                    │                 │           correlation
                     └─────────────────┼─────────────────┘
                                       ▼
                               EVIDENCE / FINDINGS
@@ -104,7 +104,7 @@ Each module receives the same shared knowledge state and can emit:
 
 The runner rejects unknown modules, inactive modules, invalid stage ordering, oversized runs, and malformed module output. The AI can only select module IDs that exist in the catalog and are eligible for the current configured capabilities; actual execution requires a registered implementation.
 
-Implemented procedures currently include Web hardening/visibility checks, non-destructive XSS and SQLi signals, CSRF analysis, client-side JavaScript analysis, JWT/GraphQL checks, SSTI arithmetic probes, Host-header/cache signals, configured authentication/authorization workflows, and controlled direct/indirect AI prompt-injection procedures.
+Implemented procedures currently include Web hardening/visibility checks, non-destructive XSS/SQLi/NoSQL signals, CSRF analysis, client-side JavaScript analysis, JWT/GraphQL checks, SSTI arithmetic probes, Host-header/cache signals, path/upload/WebSocket surface analysis, configured authentication/authorization workflows, and controlled AI prompt/boundary procedures. Passive surface modules also map SSRF, command-execution, XML, deserialization, business-logic, RAG, vector, tool, data-poisoning, resource-limit, and multi-agent surfaces for bounded follow-up testing.
 
 ---
 
@@ -295,6 +295,7 @@ These procedures do not invent credentials, selectors, object identifiers, or pr
 - [x] API baseline
 - [x] Reflected XSS signal detection
 - [x] SQL injection error/differential signals
+- [x] Bounded NoSQL differential testing
 - [x] CSRF form analysis
 - [x] Client-side JavaScript source/sink analysis
 - [x] JWT algorithm signal analysis
@@ -304,37 +305,49 @@ These procedures do not invent credentials, selectors, object identifiers, or pr
 - [x] Cache-policy/reflection signals
 - [x] Configured authentication workflow
 - [x] Configured low/high-privilege authorization comparison
+- [x] Bounded path-traversal marker checks
+- [x] Passive file-upload validation analysis
+- [x] WebSocket endpoint discovery
+- [x] SSRF sink discovery
+- [x] Command-execution sink discovery
+- [x] XML-processing surface discovery
+- [x] Serialization/deserialization surface discovery
+- [x] Business-logic workflow candidate discovery
 - [x] Direct prompt-injection canary
 - [x] Indirect prompt-injection procedure
 - [x] Protected system-prompt marker test
+- [x] Protected-data disclosure marker test
+- [x] AI output-handling probe
+- [x] Goal-hijacking marker procedure
+- [x] Context-manipulation marker procedure
+- [x] AI tool-surface discovery
+- [x] RAG/retrieval surface discovery
+- [x] Vector/embedding surface discovery
+- [x] Untrusted AI-context source discovery
+- [x] AI resource-control visibility analysis
+- [x] Multi-agent surface discovery
 
-### Next major vulnerability procedures
+### Remaining major validation procedures
 
-- [ ] NoSQL injection
-- [ ] SSRF
-- [ ] Command injection
-- [ ] Path traversal
-- [ ] File-upload security
-- [ ] XXE
-- [ ] Unsafe deserialization
+- [ ] Active SSRF validation
+- [ ] Active command-injection validation
+- [ ] Active XXE validation
+- [ ] Active unsafe-deserialization validation
 - [ ] Full cache poisoning/deception confirmation
 - [ ] HTTP request smuggling
-- [ ] Full JWT signing/claim validation
+- [ ] JWT signing/claim validation beyond passive analysis
 - [ ] GraphQL authorization/query abuse
-- [ ] WebSocket security
+- [ ] Active WebSocket authentication/authorization/message testing
 - [ ] Race-condition testing
 - [ ] Business-logic workflow abuse
 - [ ] Full IDOR/object-level authorization testing
-- [ ] AI sensitive-data disclosure
-- [ ] AI output handling
-- [ ] AI tool abuse
-- [ ] Excessive agency
-- [ ] RAG/vector security
-- [ ] AI data poisoning
-- [ ] Resource/cost abuse
-- [ ] Multi-agent security
-- [ ] Goal hijacking
-- [ ] Memory/context manipulation
+- [ ] Active AI tool-abuse validation
+- [ ] Active excessive-agency validation
+- [ ] Active RAG/vector authorization and isolation testing
+- [ ] Active AI data-poisoning validation
+- [ ] Resource/cost exhaustion confirmation
+- [ ] Active multi-agent trust-boundary testing
+- [ ] Full sensitive-information disclosure testing beyond configured markers
 
 ### Productization
 
@@ -351,4 +364,4 @@ These procedures do not invent credentials, selectors, object identifiers, or pr
 
 ## Current principle
 
-Phobos is developed as a controlled security-testing platform, not an unrestricted autonomous exploit framework. New vulnerability procedures are only marked implemented once they have a bounded execution contract, deterministic evidence logic, appropriate authorization/configuration gates where necessary, and regression coverage.
+Phobos is developed as a controlled security-testing platform, not an unrestricted autonomous exploit framework. New vulnerability procedures are only marked implemented once they have a bounded execution contract, deterministic evidence logic, appropriate authorization/configuration gates where necessary, and regression coverage. Surface-identification modules may intentionally stop at a high-confidence candidate and hand active confirmation to a later controlled procedure.
