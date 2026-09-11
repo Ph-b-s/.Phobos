@@ -12,12 +12,12 @@ dependencies = []
 
 [project.optional-dependencies]
 browser = ["playwright==1.62.0"]
-desktop = ["pyside6==6.10.1", "pyinstaller>=6.22,<7"]
+desktop = ["pyside6==6.10.1", "pyinstaller>=6.22,<7", "playwright==1.62.0"]
 dev = ["pytest>=8,<9"]
 
 [project.scripts]
 phobos = "cli:main"
-phobos-desktop = "desktop_app:main"
+phobos-desktop = "desktop_launcher:main"
 
 [tool.setuptools]
 py-modules = [
@@ -43,6 +43,7 @@ py-modules = [
     "cross_layer",
     "csrf_module",
     "desktop_app",
+    "desktop_launcher",
     "evidence",
     "graph",
     "knowledge_store",
