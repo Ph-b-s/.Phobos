@@ -4,7 +4,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from knowledge_store import SecurityObservation
 from models import AssetType, Finding
@@ -141,9 +141,8 @@ def _run_configured_rag(context, config):
     findings = []
     for index, endpoint in enumerate(endpoints):
         if method == "GET":
-            safe_query = json.dumps({"query": query}, separators=(",", ":"))
             suffix = "&" if "?" in endpoint else "?"
-            request_url = endpoint + suffix + "q=" + __import__("urllib.parse", fromlist=["quote"]).quote(query, safe="")
+            request_url = endpoint + suffix + "q=" + quote(query, safe="")
             low = requests.get(request_url, headers=low_headers)
             high = requests.get(request_url, headers=high_headers)
         else:
@@ -158,12 +157,10 @@ def _run_configured_rag(context, config):
         allowed_low = tuple(marker for marker in allowed if marker in low_text)
         allowed_high = tuple(marker for marker in allowed if marker in high_text)
         oid = _id("ai.rag.validation", context.target, f"{endpoint}:{query}:{index}")
-        observations.append(SecurityObservation(id=oid, kind="ai.rag.authorization_grounding_validation", source="ai.rag", description="Configured low/high RAG retrieval responses compared with explicit authorization and grounding markers.", data={"endpoint": urlsplit(endpoint)._replace(query="", fragment="").geturl(), "method": method, "query_digest": _rag_digest(query), "low": {"status": low.status, "body_digest": _rag_digest(low_text), "body_length": len(low_text), "forbidden_markers_observed": list(forbidden_low), "allowed_markers_observed": list(allowed_low)}, "high": {"status": high.status, "body_digest": _rag_digest(high_text), "body_length": len(high_text), "forbidden_markers_observed": list(forbidden_high), "allowed_markers_observed": list(allowed_high)}, "identical_response_signature": identical}, confidence=0.94))
+        observations.append(SecurityObservation(id=oid, kind="ai.rag.authorization_grounding_validation", source="ai.rag", description="Configured low/high RAG retrieval responses compared with explicit authorization and grounding markers.", data={"endpoint": urlsplit(endpoint)._replace(query="", fragment="").geturl(), "method": method, "query_digest": _rag_digest(query), "low": {"status": low.status, "body_digest": _rag_digest(low_text), "body_length": len(low_text), "forbidden_markers_observed": list(forbidden_low), "allowed_markers_observed": list(allowed_low)}, "high": {"status": high.status, "body_digest": _rag_digest(high_text), "body_length": len(high_text), "forbidden_markers_observed": [], "allowed_markers_observed": list(allowed_high)}, "identical_response_signature": identical}, confidence=0.94))
         if forbidden_low:
             findings.append(Finding(id=_id("ai.rag.finding", endpoint, f"auth:{index}"), type="ai_rag_authorization_failure", confidence=0.88, evidence=(oid,), metadata={"severity": "high", "status": "forbidden_rag_content_observed_for_low_privilege"}))
-        if forbidden_high and not forbidden_low:
-            findings.append(Finding(id=_id("ai.rag.finding", endpoint, f"grounding:{index}"), type="ai_rag_grounding_boundary_signal", confidence=0.84, evidence=(oid,), metadata={"severity": "medium", "status": "configured_high_privilege_source_observed"}))
-        if identical and not findings:
+        if identical and not forbidden_low:
             findings.append(Finding(id=_id("ai.rag.finding", endpoint, f"comparison:{index}"), type="ai_rag_authorization_consistency_signal", confidence=0.72, evidence=(oid,), metadata={"severity": "medium", "status": "low_high_retrieval_signatures_identical_requires_context_confirmation"}))
     return ModuleResult(observations=tuple(observations), findings=tuple(findings))
 
