@@ -53,6 +53,8 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("web.jwt", "inspect discovered JWT-like tokens for unsafe algorithm signals"),
         ModuleSelection("web.graphql", "assess discovered GraphQL endpoints with bounded read-only introspection"),
         ModuleSelection("web.ssti", "probe arithmetic-only template expressions for evaluation signals"),
+        ModuleSelection("web.cache", "inspect cache policy and untrusted-input reflection signals"),
+        ModuleSelection("web.host_header", "inspect Host-header trust behavior without changing state"),
         ModuleSelection("cross_layer.web_to_ai", "correlate Web inputs with AI surfaces"),
         ModuleSelection("cross_layer.ai_to_web", "correlate AI surfaces with downstream Web capabilities"),
         ModuleSelection("cross_layer.auth_boundary", "review Web/AI authorization boundaries"),
