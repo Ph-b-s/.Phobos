@@ -24,8 +24,6 @@ class ModuleStage(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ModuleContext:
-    """Shared state supplied to one module execution."""
-
     target: str
     assets: tuple[Asset, ...] = ()
     knowledge: KnowledgeStore | None = None
@@ -75,10 +73,10 @@ class ModuleSpec:
 
 
 MODULE_CATALOG: tuple[ModuleSpec, ...] = (
-    ModuleSpec("web.headers", "Security headers", "Check response security headers and policy gaps.", ModuleDomain.WEB),
-    ModuleSpec("web.cookies", "Cookie security", "Check Secure, HttpOnly, SameSite, scope, and session-cookie behavior.", ModuleDomain.WEB),
-    ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB),
-    ModuleSpec("web.methods", "HTTP methods", "Test unusual or dangerous HTTP method exposure.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.headers", "Security headers", "Check response security headers and policy gaps.", ModuleDomain.WEB, active=True, implemented=True),
+    ModuleSpec("web.cookies", "Cookie security", "Check Secure, HttpOnly, SameSite, scope, and session-cookie behavior.", ModuleDomain.WEB, active=True, implemented=True),
+    ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB, active=True, implemented=True),
+    ModuleSpec("web.methods", "HTTP methods", "Test unusual or dangerous HTTP method exposure.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.auth", "Authentication", "Test login, session, reset, MFA, and authentication boundary behavior.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.access_control", "Access control", "Test authorization boundaries, IDOR, privilege escalation, and object access.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.injection", "Generic injection", "Select and coordinate injection procedures for discovered inputs.", ModuleDomain.WEB, active=True),
@@ -93,7 +91,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.xxe", "XXE", "Test XML processing for external-entity injection conditions.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.ssti", "Server-side template injection", "Test template expression surfaces for server-side evaluation.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.deserialization", "Deserialization", "Test serialized-object inputs for unsafe deserialization behavior.", ModuleDomain.WEB, active=True),
-    ModuleSpec("web.cors", "CORS", "Test cross-origin policy and credential exposure.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.cors", "CORS", "Test cross-origin policy and credential exposure.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.cache", "Web cache attacks", "Test cache poisoning, deception, and keying behavior.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.request_smuggling", "Request smuggling", "Test front-end/back-end HTTP parsing inconsistencies.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.host_header", "Host header attacks", "Test host-header handling and trust assumptions.", ModuleDomain.WEB, active=True),
@@ -103,7 +101,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.race_conditions", "Race conditions", "Test concurrent state transitions for timing-sensitive flaws.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.business_logic", "Business logic", "Test workflows for abuse, state confusion, and invariant violations.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.info_disclosure", "Information disclosure", "Check responses and interfaces for unintended sensitive data exposure.", ModuleDomain.WEB),
-    ModuleSpec("web.config", "Configuration security", "Check deployment and application configuration weaknesses.", ModuleDomain.WEB),
+    ModuleSpec("web.config", "Configuration security", "Check deployment and application configuration weaknesses.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.browser_runtime", "Browser runtime", "Use a real browser to execute JavaScript, observe rendered DOM, and capture runtime requests.", ModuleDomain.WEB, active=True, tool="playwright"),
     ModuleSpec("web.client_javascript", "Client-side JavaScript", "Inspect and test browser-side JavaScript routes, sinks, and application behavior.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.api", "API security", "Test discovered HTTP APIs, including authorization, input validation, and state transitions.", ModuleDomain.WEB, active=True),
