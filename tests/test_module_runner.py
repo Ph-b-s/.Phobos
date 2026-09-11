@@ -13,9 +13,17 @@ def observation(identifier: str = "obs-1") -> SecurityObservation:
     )
 
 
-def test_default_registry_contains_only_the_seven_implemented_cross_layer_modules():
+def test_default_registry_contains_all_currently_implemented_modules():
     registry = default_module_registry()
     assert registry.ids() == {
+        "web.headers",
+        "web.cookies",
+        "web.exposure",
+        "web.methods",
+        "web.config",
+        "web.cors",
+        "web.nmap",
+        "ai.indirect_prompt_injection",
         "cross_layer.web_to_ai",
         "cross_layer.ai_to_web",
         "cross_layer.auth_boundary",
@@ -31,7 +39,6 @@ def test_active_unregistered_module_is_reported_as_unimplemented():
         "https://example.com",
         ["web.access_control"],
     )
-
     assert run.executions[0].status == "unimplemented"
     assert run.findings == ()
 
@@ -39,9 +46,8 @@ def test_active_unregistered_module_is_reported_as_unimplemented():
 def test_inactive_module_is_not_executed():
     run = ModuleRunner(default_module_registry()).run(
         "https://example.com",
-        ["web.headers"],
+        ["web.info_disclosure"],
     )
-
     assert run.executions[0].status == "inactive"
 
 
