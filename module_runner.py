@@ -128,6 +128,7 @@ def default_module_registry() -> ModuleRegistry:
     from web_analysis_modules import run_web_client_javascript, run_web_graphql, run_web_jwt
     from template_module import run_web_ssti
     from protocol_modules import run_web_cache, run_web_host_header
+    from coverage_modules import run_web_file_upload, run_web_path_traversal, run_web_websocket
     from ai_security_modules import run_ai_prompt_injection, run_ai_system_prompt
 
     registry.register("web.headers", run_web_headers)
@@ -149,6 +150,9 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("web.ssti", run_web_ssti)
     registry.register("web.cache", run_web_cache)
     registry.register("web.host_header", run_web_host_header)
+    registry.register("web.path_traversal", run_web_path_traversal)
+    registry.register("web.file_upload", run_web_file_upload)
+    registry.register("web.websocket", run_web_websocket)
     registry.register("web.nmap", run_nmap_module)
     registry.register("ai.prompt_injection", run_ai_prompt_injection)
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
