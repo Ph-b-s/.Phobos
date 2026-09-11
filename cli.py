@@ -50,6 +50,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--ai", action="store_true", help="enable iterative local-Mistral planning")
     scan.add_argument("--max-iterations", type=int, default=3)
     scan.add_argument("--auth-config", metavar="PATH", help="JSON workflow for an authorized authenticated-session bootstrap")
+    scan.add_argument("--access-control-config", metavar="PATH", help="JSON configuration for authorized low/high-privilege comparison")
     scan.add_argument("--indirect-config", metavar="PATH", help="JSON config for the controlled indirect-injection procedure")
     scan.add_argument("--allow-state-change", action="store_true", help="allow explicitly configured state-changing validation")
     scan.add_argument("--confirm-high-risk", action="store_true", help="second human-approval gate for state-changing validation")
@@ -93,6 +94,18 @@ def _load_auth_config(path: str | None) -> dict[str, object] | None:
     steps = payload.get("steps")
     if not isinstance(steps, list) or not steps:
         raise ValueError("auth-config must contain a non-empty 'steps' list")
+    return payload
+
+
+def _load_access_control_config(path: str | None) -> dict[str, object] | None:
+    payload = _load_json_object(path, option_name="access-control-config")
+    if payload is None:
+        return None
+    for key in ("protected_urls", "low_workflow", "high_workflow"):
+        if key not in payload:
+            raise ValueError(f"access-control-config is missing '{key}'")
+    if not isinstance(payload["protected_urls"], list) or not payload["protected_urls"]:
+        raise ValueError("access-control-config.protected_urls must be a non-empty list")
     return payload
 
 
@@ -184,6 +197,7 @@ def run_scan(args: argparse.Namespace) -> int:
     graph.add_node(id=website.id, type=website.type.value, label=website.name, attributes=website.metadata)
     browser: PlaywrightBrowserSession | None = None
     auth_config = _load_auth_config(args.auth_config)
+    access_control_config = _load_access_control_config(args.access_control_config)
     indirect_config = _load_indirect_config(args.indirect_config)
     allow_state_change = bool(args.allow_state_change and args.confirm_high_risk)
     if args.allow_state_change and not args.confirm_high_risk:
@@ -193,13 +207,15 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"  Target: {config.target}")
     print(f"  Scope:  {', '.join(scope.allowed_domains)}")
     print(f"  Web runtime: {'browser/JavaScript' if args.browser else 'static HTTP'}")
-    if args.auth_config:
+    if auth_config:
         print("  Authentication: configured workflow")
+    if access_control_config:
+        print("  Authorization: configured low/high-privilege comparison")
     if args.ai:
         print(f"  AI planning: enabled ({args.max_iterations} iterations max)")
 
     try:
-        if args.browser or auth_config is not None:
+        if args.browser or auth_config is not None or access_control_config is not None:
             browser = PlaywrightBrowserSession(scope, limits=BrowserLimits(
                 max_requests=args.browser_max_requests, navigation_timeout_ms=int(config.timeout * 1000)),
                 browser_name=args.browser_name, user_agent=config.user_agent)
@@ -222,7 +238,7 @@ def run_scan(args: argparse.Namespace) -> int:
             "workflow": register_standard_actions(WorkflowEngine()),
             "applications": related,
             "metadata": {"scope": scope, "request_manager": manager,
-                         "auth_workflow": auth_config or {},
+                         "auth_workflow": auth_config or {}, "access_control": access_control_config or {},
                          "indirect_prompt_injection": indirect_config or {}, "allow_state_change": allow_state_change},
         }
         eligible_ai_modules = {item.id for item in module_index().values() if item.active and item.implemented}
@@ -232,8 +248,15 @@ def run_scan(args: argparse.Namespace) -> int:
             eligible_ai_modules.discard("ai.indirect_prompt_injection")
         if auth_config is None:
             eligible_ai_modules.discard("web.auth")
+        if access_control_config is None:
+            eligible_ai_modules.discard("web.access_control")
 
         plan = _initial_plan(args, indirect_config)
+        if auth_config is not None and "web.auth" not in {item.module_id for item in plan.selections} and args.ai is False:
+            plan = merge_module_selections(plan, [ModuleSelection("web.auth", "configured authentication workflow")], source=plan.source)
+        if access_control_config is not None and "web.access_control" not in {item.module_id for item in plan.selections} and args.ai is False:
+            plan = merge_module_selections(plan, [ModuleSelection("web.access_control", "configured low/high privilege comparison")], source=plan.source)
+
         completed: set[str] = set()
         final_scan = None
         planner = ScanPlanner(LocalMistralClient(AIConfig.from_env()), max_iterations=args.max_iterations) if args.ai else None
