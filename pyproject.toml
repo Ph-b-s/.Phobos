@@ -37,6 +37,7 @@ py-modules = [
     "crawler",
     "cross_application",
     "cross_layer",
+    "csrf_module",
     "desktop_app",
     "evidence",
     "graph",
