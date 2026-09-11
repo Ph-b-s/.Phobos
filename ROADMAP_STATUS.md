@@ -93,6 +93,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Passive CSRF protection analysis
 - [x] Client-side JavaScript source/sink analysis
 - [x] JWT-like token analysis with token redaction
+- [x] Configured JWT algorithm and claim-policy validation
 - [x] GraphQL introspection analysis
 - [x] GraphQL authorization-sensitive surface discovery
 - [x] Configured read-only GraphQL low/high-privilege authorization comparison
@@ -120,7 +121,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] Active unsafe-deserialization validation
 - [ ] Cache poisoning/deception confirmation
 - [ ] HTTP request smuggling confirmation
-- [ ] JWT signing/claim validation beyond passive analysis
+- [ ] JWT signing/cryptographic verification beyond configured claim/algorithm policy validation
 - [ ] Broader GraphQL query authorization/abuse testing beyond configured read-only role comparison
 - [ ] Active WebSocket message-level authentication/authorization testing
 - [ ] Race-condition testing
