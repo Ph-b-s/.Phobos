@@ -133,6 +133,19 @@ def default_module_registry() -> ModuleRegistry:
     from ai_security_modules import run_ai_prompt_injection, run_ai_system_prompt
     from ai_data_module import run_ai_data_disclosure
     from ai_boundary_modules import run_ai_output_handling, run_ai_goal_hijacking, run_ai_context_manipulation
+    from surface_analysis_modules import (
+        run_web_ssrf,
+        run_web_command_injection,
+        run_web_xxe,
+        run_web_deserialization,
+        run_web_business_logic,
+        run_ai_tool_abuse,
+        run_ai_rag,
+        run_ai_vector,
+        run_ai_data_poisoning,
+        run_ai_unbounded_consumption,
+        run_ai_multi_agent,
+    )
 
     registry.register("web.headers", run_web_headers)
     registry.register("web.cookies", run_web_cookies)
@@ -157,6 +170,11 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("web.path_traversal", run_web_path_traversal)
     registry.register("web.file_upload", run_web_file_upload)
     registry.register("web.websocket", run_web_websocket)
+    registry.register("web.ssrf", run_web_ssrf)
+    registry.register("web.command_injection", run_web_command_injection)
+    registry.register("web.xxe", run_web_xxe)
+    registry.register("web.deserialization", run_web_deserialization)
+    registry.register("web.business_logic", run_web_business_logic)
     registry.register("web.nmap", run_nmap_module)
     registry.register("ai.prompt_injection", run_ai_prompt_injection)
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
@@ -165,6 +183,12 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("ai.output_handling", run_ai_output_handling)
     registry.register("ai.goal_hijacking", run_ai_goal_hijacking)
     registry.register("ai.context_manipulation", run_ai_context_manipulation)
+    registry.register("ai.tool_abuse", run_ai_tool_abuse)
+    registry.register("ai.rag", run_ai_rag)
+    registry.register("ai.vector", run_ai_vector)
+    registry.register("ai.data_poisoning", run_ai_data_poisoning)
+    registry.register("ai.unbounded_consumption", run_ai_unbounded_consumption)
+    registry.register("ai.multi_agent", run_ai_multi_agent)
     return registry
 
 
