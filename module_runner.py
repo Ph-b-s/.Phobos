@@ -129,7 +129,9 @@ def default_module_registry() -> ModuleRegistry:
     from template_module import run_web_ssti
     from protocol_modules import run_web_cache, run_web_host_header
     from coverage_modules import run_web_file_upload, run_web_path_traversal, run_web_websocket
+    from nosql_module import run_web_nosql
     from ai_security_modules import run_ai_prompt_injection, run_ai_system_prompt
+    from ai_data_module import run_ai_data_disclosure
 
     registry.register("web.headers", run_web_headers)
     registry.register("web.cookies", run_web_cookies)
@@ -141,6 +143,7 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("web.api", run_web_api)
     registry.register("web.xss", run_web_xss)
     registry.register("web.sqli", run_web_sqli)
+    registry.register("web.nosqli", run_web_nosql)
     registry.register("web.auth", run_web_auth)
     registry.register("web.csrf", run_web_csrf)
     registry.register("web.access_control", run_web_access_control)
@@ -157,6 +160,7 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("ai.prompt_injection", run_ai_prompt_injection)
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
     registry.register("ai.system_prompt", run_ai_system_prompt)
+    registry.register("ai.data_disclosure", run_ai_data_disclosure)
     return registry
 
 
