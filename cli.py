@@ -52,6 +52,8 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--auth-config", metavar="PATH", help="JSON workflow for an authorized authenticated-session bootstrap")
     scan.add_argument("--access-control-config", metavar="PATH", help="JSON configuration for authorized low/high-privilege comparison")
     scan.add_argument("--indirect-config", metavar="PATH", help="JSON config for the controlled indirect-injection procedure")
+    scan.add_argument("--prompt-injection-config", metavar="PATH", help="JSON config for a benign direct-injection canary")
+    scan.add_argument("--system-prompt-config", metavar="PATH", help="JSON config for a protected system-marker disclosure test")
     scan.add_argument("--allow-state-change", action="store_true", help="allow explicitly configured state-changing validation")
     scan.add_argument("--confirm-high-risk", action="store_true", help="second human-approval gate for state-changing validation")
     scan.add_argument("--no-report", action="store_true", help="skip Markdown report generation")
@@ -106,6 +108,16 @@ def _load_access_control_config(path: str | None) -> dict[str, object] | None:
             raise ValueError(f"access-control-config is missing '{key}'")
     if not isinstance(payload["protected_urls"], list) or not payload["protected_urls"]:
         raise ValueError("access-control-config.protected_urls must be a non-empty list")
+    return payload
+
+
+def _load_ai_config(path: str | None, *, option_name: str) -> dict[str, object] | None:
+    payload = _load_json_object(path, option_name=option_name)
+    if payload is None:
+        return None
+    for key in ("chat_url", "chat_input_selector", "chat_submit_selector"):
+        if not str(payload.get(key, "")).strip():
+            raise ValueError(f"{option_name} is missing required key: {key}")
     return payload
 
 
@@ -199,6 +211,8 @@ def run_scan(args: argparse.Namespace) -> int:
     auth_config = _load_auth_config(args.auth_config)
     access_control_config = _load_access_control_config(args.access_control_config)
     indirect_config = _load_indirect_config(args.indirect_config)
+    prompt_injection_config = _load_ai_config(args.prompt_injection_config, option_name="prompt-injection-config")
+    system_prompt_config = _load_ai_config(args.system_prompt_config, option_name="system-prompt-config")
     allow_state_change = bool(args.allow_state_change and args.confirm_high_risk)
     if args.allow_state_change and not args.confirm_high_risk:
         print("[PHOBOS] State-changing validation requested without --confirm-high-risk; validation remains disabled.")
@@ -211,11 +225,15 @@ def run_scan(args: argparse.Namespace) -> int:
         print("  Authentication: configured workflow")
     if access_control_config:
         print("  Authorization: configured low/high-privilege comparison")
+    if prompt_injection_config:
+        print("  AI direct injection: configured canary")
+    if system_prompt_config:
+        print("  AI system prompt: configured protected marker")
     if args.ai:
         print(f"  AI planning: enabled ({args.max_iterations} iterations max)")
 
     try:
-        if args.browser or auth_config is not None or access_control_config is not None:
+        if args.browser or auth_config is not None or access_control_config is not None or prompt_injection_config is not None or system_prompt_config is not None:
             browser = PlaywrightBrowserSession(scope, limits=BrowserLimits(
                 max_requests=args.browser_max_requests, navigation_timeout_ms=int(config.timeout * 1000)),
                 browser_name=args.browser_name, user_agent=config.user_agent)
@@ -239,7 +257,8 @@ def run_scan(args: argparse.Namespace) -> int:
             "applications": related,
             "metadata": {"scope": scope, "request_manager": manager,
                          "auth_workflow": auth_config or {}, "access_control": access_control_config or {},
-                         "indirect_prompt_injection": indirect_config or {}, "allow_state_change": allow_state_change},
+                         "indirect_prompt_injection": indirect_config or {}, "prompt_injection": prompt_injection_config or {},
+                         "system_prompt": system_prompt_config or {}, "allow_state_change": allow_state_change},
         }
         eligible_ai_modules = {item.id for item in module_index().values() if item.active and item.implemented}
         if not args.nmap:
@@ -250,12 +269,20 @@ def run_scan(args: argparse.Namespace) -> int:
             eligible_ai_modules.discard("web.auth")
         if access_control_config is None:
             eligible_ai_modules.discard("web.access_control")
+        if prompt_injection_config is None:
+            eligible_ai_modules.discard("ai.prompt_injection")
+        if system_prompt_config is None:
+            eligible_ai_modules.discard("ai.system_prompt")
 
         plan = _initial_plan(args, indirect_config)
         if auth_config is not None and "web.auth" not in {item.module_id for item in plan.selections} and args.ai is False:
             plan = merge_module_selections(plan, [ModuleSelection("web.auth", "configured authentication workflow")], source=plan.source)
         if access_control_config is not None and "web.access_control" not in {item.module_id for item in plan.selections} and args.ai is False:
             plan = merge_module_selections(plan, [ModuleSelection("web.access_control", "configured low/high privilege comparison")], source=plan.source)
+        if prompt_injection_config is not None and "ai.prompt_injection" not in {item.module_id for item in plan.selections} and args.ai is False:
+            plan = merge_module_selections(plan, [ModuleSelection("ai.prompt_injection", "configured direct-injection canary")], source=plan.source)
+        if system_prompt_config is not None and "ai.system_prompt" not in {item.module_id for item in plan.selections} and args.ai is False:
+            plan = merge_module_selections(plan, [ModuleSelection("ai.system_prompt", "configured protected-marker test")], source=plan.source)
 
         completed: set[str] = set()
         final_scan = None
