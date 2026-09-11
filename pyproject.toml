@@ -29,7 +29,6 @@ py-modules = [
     "ai_security_modules",
     "ai_setup",
     "ai_surface",
-    "ai_surface_modules",
     "ai_testing",
     "app_services",
     "assessment_engine",
