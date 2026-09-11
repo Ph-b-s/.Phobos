@@ -57,8 +57,19 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("web.path_traversal", "probe GET parameters with a nonexistent traversal marker"),
         ModuleSelection("web.file_upload", "passively assess discovered upload validation signals"),
         ModuleSelection("web.websocket", "discover WebSocket endpoints without connecting"),
+        ModuleSelection("web.ssrf", "identify likely server-side request sinks"),
+        ModuleSelection("web.command_injection", "identify likely command-execution sinks"),
+        ModuleSelection("web.xxe", "identify likely XML-processing surfaces"),
+        ModuleSelection("web.deserialization", "identify likely serialization/deserialization surfaces"),
+        ModuleSelection("web.business_logic", "identify high-value workflow candidates"),
         ModuleSelection("web.cache", "inspect cache policy and untrusted-input reflection signals"),
         ModuleSelection("web.host_header", "inspect Host-header trust behavior without changing state"),
+        ModuleSelection("ai.rag", "identify retrieval and grounding surfaces"),
+        ModuleSelection("ai.vector", "identify vector and embedding surfaces"),
+        ModuleSelection("ai.data_poisoning", "identify untrusted AI context sources"),
+        ModuleSelection("ai.tool_abuse", "identify model-controlled tool surfaces"),
+        ModuleSelection("ai.unbounded_consumption", "inspect AI resource-consumption controls"),
+        ModuleSelection("ai.multi_agent", "identify agent handoff boundaries"),
         ModuleSelection("cross_layer.web_to_ai", "correlate Web inputs with AI surfaces"),
         ModuleSelection("cross_layer.ai_to_web", "correlate AI surfaces with downstream Web capabilities"),
         ModuleSelection("cross_layer.auth_boundary", "review Web/AI authorization boundaries"),
@@ -68,7 +79,7 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("cross_layer.attack_path", "rank cross-layer attack paths"),
     ]
     if include_indirect_ai:
-        selected.insert(21, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
+        selected.insert(31, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
     if include_nmap:
         selected.append(ModuleSelection("web.nmap", "supplemental web-facing service vulnerability check"))
     return validate_plan(ScanPlan(tuple(selected), source="default"))
