@@ -22,6 +22,11 @@ def test_default_registry_contains_all_currently_implemented_modules():
         "web.methods",
         "web.config",
         "web.cors",
+        "web.info_disclosure",
+        "web.api",
+        "web.xss",
+        "web.sqli",
+        "web.auth",
         "web.nmap",
         "ai.indirect_prompt_injection",
         "cross_layer.web_to_ai",
@@ -43,12 +48,12 @@ def test_active_unregistered_module_is_reported_as_unimplemented():
     assert run.findings == ()
 
 
-def test_inactive_module_is_not_executed():
+def test_unimplemented_module_is_not_executed():
     run = ModuleRunner(default_module_registry()).run(
         "https://example.com",
-        ["web.info_disclosure"],
+        ["web.browser_runtime"],
     )
-    assert run.executions[0].status == "inactive"
+    assert run.executions[0].status == "unimplemented"
 
 
 def test_stage_order_is_enforced():
