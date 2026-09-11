@@ -78,6 +78,15 @@ class _Interactor:
         return _Snapshot("same protected object content")
 
 
+class _WebSocketInteractor:
+    def __init__(self, states=("open", "open")):
+        self.calls = []
+        self.states = list(states)
+    def websocket_handshake(self, url, *, headers, protocols):
+        self.calls.append((url, dict(headers), tuple(protocols)))
+        return {"url": url.split("?", 1)[0], "state": self.states.pop(0)}
+
+
 class _Response:
     def __init__(self, status, text):
         self.status = status
@@ -126,3 +135,41 @@ def test_configured_graphql_auth_rejects_mutations():
         assert "read-only" in str(exc)
     else:
         raise AssertionError("mutation query was not rejected")
+
+
+def test_configured_websocket_auth_compares_low_high_handshakes_only():
+    interactor = _WebSocketInteractor()
+    metadata = {
+        "websocket_auth": {
+            "endpoints": ["wss://example.com/socket?session=redacted"],
+            "protocols": ["chat"],
+            "low_headers": {"Authorization": "Bearer LOW"},
+            "high_headers": {"Authorization": "Bearer HIGH"},
+        }
+    }
+    result = default_module_registry().get("web.websocket_auth_surface")(_context((), metadata, interactor))
+    assert result.observations
+    assert result.findings[0].type == "potential_websocket_authorization_failure"
+    assert len(interactor.calls) == 2
+    assert all(call[2] == ("chat",) for call in interactor.calls)
+    assert interactor.calls[0][1]["Authorization"] == "Bearer LOW"
+    assert interactor.calls[1][1]["Authorization"] == "Bearer HIGH"
+
+
+def test_configured_websocket_auth_does_not_flag_rejected_low_privilege_handshake():
+    interactor = _WebSocketInteractor(states=("error", "open"))
+    metadata = {"websocket_auth": {"endpoints": ["wss://example.com/socket"], "low_headers": {}, "high_headers": {"Authorization": "Bearer HIGH"}}}
+    result = default_module_registry().get("web.websocket_auth_surface")(_context((), metadata, interactor))
+    assert result.observations
+    assert not result.findings
+
+
+def test_configured_websocket_auth_rejects_http_endpoints():
+    interactor = _WebSocketInteractor()
+    metadata = {"websocket_auth": {"endpoints": ["https://example.com/socket"], "low_headers": {}, "high_headers": {}}}
+    try:
+        default_module_registry().get("web.websocket_auth_surface")(_context((), metadata, interactor))
+    except ValueError as exc:
+        assert "ws://" in str(exc)
+    else:
+        raise AssertionError("HTTP endpoint was not rejected")
