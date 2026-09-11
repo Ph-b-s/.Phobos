@@ -6,14 +6,15 @@ from scanner import default_module_selection
 from security_modules import ModuleContext
 
 
-def _context(assets):
-    return ModuleContext(target="https://example.com", assets=tuple(assets), knowledge=KnowledgeStore(), graph=Graph())
+def _context(assets, metadata=None):
+    return ModuleContext(target="https://example.com", assets=tuple(assets), knowledge=KnowledgeStore(), graph=Graph(), metadata=metadata or {})
 
 
 def test_default_plan_includes_integrated_modules_in_web_ai_stage():
     ids = {item.module_id for item in default_module_selection().selections}
     assert {"web.openapi", "web.open_redirect", "web.source_maps", "web.sensitive_inputs"} <= ids
-    assert {"ai.memory", "ai.identity", "ai.trust_boundary"} <= ids
+    assert {"web.graphql_auth_surface", "web.websocket_auth_surface", "web.object_authorization"} <= ids
+    assert {"ai.memory", "ai.identity", "ai.trust_boundary", "ai.tool_rag_bridge"} <= ids
 
 
 def test_openapi_and_redirect_surfaces_are_identified_without_networking():
@@ -62,3 +63,25 @@ def test_ai_trust_boundary_emits_bounded_auth_followups():
     assert result.observations
     assert result.follow_ups
     assert all(item["module_id"] == "cross_layer.auth_boundary" for item in result.follow_ups)
+
+
+def test_graphql_and_websocket_auth_surfaces_are_passive():
+    assets = (
+        Asset("gql", AssetType.API, "graphql viewer query", "https://example.com/api/graphql", metadata={"description": "viewer account tenant permissions"}),
+        Asset("ws", AssetType.ENDPOINT, "notifications websocket", "wss://example.com/socket", metadata={"description": "websocket"}),
+    )
+    registry = default_module_registry()
+    gql = registry.get("web.graphql_auth_surface")(_context(assets))
+    ws = registry.get("web.websocket_auth_surface")(_context(assets))
+    assert gql.findings[0].type == "graphql_authorization_surface"
+    assert ws.findings[0].type == "websocket_authentication_requires_review"
+
+
+def test_tool_rag_bridge_emits_bounded_followups():
+    assets = (
+        Asset("tool", AssetType.TOOL, "customer search tool", "https://example.com/tools/customer", metadata={"description": "tool function customer profile"}),
+        Asset("rag", AssetType.RESOURCE, "customer knowledge documents", "https://example.com/knowledge/customer", metadata={"description": "RAG retrieval customer profile"}),
+    )
+    result = default_module_registry().get("ai.tool_rag_bridge")(_context(assets))
+    assert result.observations
+    assert {item["module_id"] for item in result.follow_ups} == {"cross_layer.auth_boundary", "cross_layer.data_flow"}
