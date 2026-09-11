@@ -50,6 +50,18 @@ def test_jwt_module_flags_none_algorithm_without_storing_token():
     assert all(token not in repr(item.data) for item in result.observations)
 
 
+def test_jwt_module_flags_missing_exp_as_limited_signal():
+    import base64
+    header = base64.urlsafe_b64encode(b'{"alg":"HS256","typ":"JWT"}').decode().rstrip("=")
+    payload = base64.urlsafe_b64encode(b'{"sub":"123"}').decode().rstrip("=")
+    token = f"{header}.{payload}.signature"
+    requests = FakeRequests(lambda method, url, headers, body: FakeResponse(token))
+    asset = Asset("page_1", AssetType.PAGE, "page", "https://example.com/page")
+    context = ModuleContext(target="https://example.com", assets=(asset,), knowledge=KnowledgeStore(), graph=Graph(), metadata={"request_manager": requests})
+    result = default_module_registry().get("web.jwt")(context)
+    assert any(item.type == "jwt_missing_exp_claim_signal" for item in result.findings)
+
+
 def test_graphql_module_flags_enabled_introspection():
     requests = FakeRequests(lambda method, url, headers, body: FakeResponse(
         '{"data":{"__schema":{"queryType":{"name":"Query"}}}}',
