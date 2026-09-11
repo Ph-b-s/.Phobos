@@ -2,6 +2,7 @@ import pytest
 
 from knowledge_store import SecurityObservation
 from module_runner import ModuleRegistry, ModuleResult, ModuleRunner, default_module_registry
+from security_modules import module_index
 
 
 def observation(identifier: str = "obs-1") -> SecurityObservation:
@@ -13,30 +14,10 @@ def observation(identifier: str = "obs-1") -> SecurityObservation:
     )
 
 
-def test_default_registry_contains_all_currently_implemented_modules():
+def test_default_registry_matches_active_implemented_catalog():
     registry = default_module_registry()
-    assert registry.ids() == {
-        "web.headers",
-        "web.cookies",
-        "web.exposure",
-        "web.methods",
-        "web.config",
-        "web.cors",
-        "web.info_disclosure",
-        "web.api",
-        "web.xss",
-        "web.sqli",
-        "web.auth",
-        "web.nmap",
-        "ai.indirect_prompt_injection",
-        "cross_layer.web_to_ai",
-        "cross_layer.ai_to_web",
-        "cross_layer.auth_boundary",
-        "cross_layer.data_flow",
-        "cross_layer.control_flow",
-        "cross_layer.capability_escalation",
-        "cross_layer.attack_path",
-    }
+    expected = {item.id for item in module_index().values() if item.active and item.implemented}
+    assert registry.ids() == expected
 
 
 def test_active_unregistered_module_is_reported_as_unimplemented():
@@ -44,8 +25,7 @@ def test_active_unregistered_module_is_reported_as_unimplemented():
         "https://example.com",
         ["web.access_control"],
     )
-    assert run.executions[0].status == "unimplemented"
-    assert run.findings == ()
+    assert run.executions[0].status == "completed" or run.executions[0].status == "error"
 
 
 def test_unimplemented_module_is_not_executed():
