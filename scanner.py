@@ -52,6 +52,7 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("web.client_javascript", "inspect discovered JavaScript for risky source/sink combinations"),
         ModuleSelection("web.jwt", "inspect discovered JWT-like tokens for unsafe algorithm signals"),
         ModuleSelection("web.graphql", "assess discovered GraphQL endpoints with bounded read-only introspection"),
+        ModuleSelection("web.ssti", "probe arithmetic-only template expressions for evaluation signals"),
         ModuleSelection("cross_layer.web_to_ai", "correlate Web inputs with AI surfaces"),
         ModuleSelection("cross_layer.ai_to_web", "correlate AI surfaces with downstream Web capabilities"),
         ModuleSelection("cross_layer.auth_boundary", "review Web/AI authorization boundaries"),
@@ -61,7 +62,7 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("cross_layer.attack_path", "rank cross-layer attack paths"),
     ]
     if include_indirect_ai:
-        selected.insert(14, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
+        selected.insert(15, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
     if include_nmap:
         selected.append(ModuleSelection("web.nmap", "supplemental web-facing service vulnerability check"))
     return validate_plan(ScanPlan(tuple(selected), source="default"))
