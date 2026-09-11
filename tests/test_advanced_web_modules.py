@@ -64,12 +64,15 @@ def test_sqli_flags_database_error_signature():
     assert any(item.type == "potential_sql_injection_error_signal" for item in result.findings)
 
 
-def test_information_disclosure_detects_private_key_marker():
-    requests = FakeRequests(lambda url, headers: FakeResponse(
-        "-----BEGIN PRIVATE KEY-----" if "/search" in url else "ok"
-    ))
+def test_information_disclosure_detects_private_key_marker_without_storing_secret():
+    secret = "-----BEGIN PRIVATE KEY-----"
+    requests = FakeRequests(lambda url, headers: FakeResponse(secret if "/search" in url else "ok"))
     result = default_module_registry().get("web.info_disclosure")(_context(requests, "https://example.com/search?q=test"))
-    assert any(item.type == "potential_sensitive_information_disclosure" for item in result.findings)
+    finding = next(item for item in result.findings if item.type == "potential_sensitive_information_disclosure")
+    observation = next(item for item in result.observations if item.kind == "web.info_disclosure.secret_pattern")
+    assert finding.metadata["pattern"] == "private-key material"
+    assert "context" not in observation.data
+    assert "-----BEGIN PRIVATE KEY-----" not in repr(observation.data)
 
 
 def test_api_baseline_records_json_surface():
