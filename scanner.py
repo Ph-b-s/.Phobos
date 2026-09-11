@@ -44,6 +44,10 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("web.methods", "review discovered HTTP methods"),
         ModuleSelection("web.config", "common configuration exposure"),
         ModuleSelection("web.cors", "CORS policy baseline"),
+        ModuleSelection("web.info_disclosure", "scan bounded responses for sensitive data patterns"),
+        ModuleSelection("web.api", "baseline discovered API behavior"),
+        ModuleSelection("web.xss", "probe reflected HTML injection with a harmless canary"),
+        ModuleSelection("web.sqli", "probe for non-destructive SQL error signals"),
         ModuleSelection("cross_layer.web_to_ai", "correlate Web inputs with AI surfaces"),
         ModuleSelection("cross_layer.ai_to_web", "correlate AI surfaces with downstream Web capabilities"),
         ModuleSelection("cross_layer.auth_boundary", "review Web/AI authorization boundaries"),
@@ -53,7 +57,7 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("cross_layer.attack_path", "rank cross-layer attack paths"),
     ]
     if include_indirect_ai:
-        selected.insert(6, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
+        selected.insert(10, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
     if include_nmap:
         selected.append(ModuleSelection("web.nmap", "supplemental web-facing service vulnerability check"))
     return validate_plan(ScanPlan(tuple(selected), source="default"))
