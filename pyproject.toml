@@ -46,6 +46,7 @@ py-modules = [
     "desktop_launcher",
     "evidence",
     "graph",
+    "integration_modules",
     "knowledge_store",
     "models",
     "module_adapters",
