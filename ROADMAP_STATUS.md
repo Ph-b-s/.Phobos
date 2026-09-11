@@ -41,6 +41,8 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Evidence-driven analyzer
 - [x] Explicit state-change gate
 - [x] Configurable indirect prompt-injection procedure
+- [x] Configurable direct prompt-injection canary
+- [x] Configurable system-prompt marker disclosure test
 - [x] Browser-backed execution adapter
 
 ## Phase 5 — Indirect Injection Tracking
@@ -70,17 +72,83 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Separate confidence from severity
 - [x] Cross-layer module runner integration
 
+## Web Security Procedures
+
+### Implemented
+
+- [x] Security headers baseline
+- [x] Cookie security baseline
+- [x] Common exposure checks
+- [x] HTTP method checks
+- [x] Configuration disclosure checks
+- [x] CORS policy checks
+- [x] Information-disclosure pattern detection with evidence redaction
+- [x] API baseline analysis
+- [x] Reflected XSS signal detection
+- [x] Error-based SQL injection signal detection
+- [x] Passive CSRF protection analysis
+- [x] Client-side JavaScript source/sink analysis
+- [x] JWT-like token analysis with token redaction
+- [x] GraphQL introspection analysis
+- [x] Low-impact SSTI arithmetic probes
+- [x] Host-header trust signal analysis
+- [x] Cache-policy / untrusted-reflection analysis
+- [x] Configured authentication workflow bootstrap
+- [x] Configured low/high-privilege authorization comparison
+
+### Remaining major procedures
+
+- [ ] NoSQL injection
+- [ ] SSRF
+- [ ] Command injection
+- [ ] Path traversal
+- [ ] File-upload security
+- [ ] XXE
+- [ ] Unsafe deserialization
+- [ ] Cache poisoning/deception confirmation
+- [ ] HTTP request smuggling
+- [ ] JWT signing/claim validation beyond passive header analysis
+- [ ] GraphQL authorization/query abuse testing
+- [ ] WebSocket security
+- [ ] Race-condition testing
+- [ ] Business-logic workflow abuse
+- [ ] Full authorization/IDOR object-level testing beyond configured response comparison
+
+## AI Security Procedures
+
+### Implemented
+
+- [x] Direct prompt-injection canary procedure
+- [x] Indirect prompt-injection procedure
+- [x] System-prompt marker disclosure procedure
+
+### Remaining major procedures
+
+- [ ] Sensitive-information disclosure testing
+- [ ] Unsafe AI output handling
+- [ ] Tool-abuse testing
+- [ ] Excessive-agency testing
+- [ ] RAG security testing
+- [ ] Vector/embedding security testing
+- [ ] AI data poisoning
+- [ ] Resource/cost abuse testing
+- [ ] Multi-agent trust-boundary testing
+- [ ] Goal hijacking
+- [ ] Memory/context manipulation
+
 ## Productization
 
 - [x] Human-readable Markdown report
 - [x] Deterministic scan summarizer
 - [x] Iterative AI planner with a hard iteration cap
+- [x] Eligibility gates for configuration-dependent modules
 - [x] Optional Nmap module
 - [x] Desktop application shell on shared application services
 - [x] Automated test suite and CI definition
+- [x] Evidence privacy safeguards for secrets and tokens
 
 ## Important implementation boundary
 
-The roadmap architecture is implemented, but the vulnerability catalog remains intentionally broader than the set of executable procedures. A vulnerability module is marked `implemented=True` only when it has a registered handler and deterministic evidence logic. Advanced modules such as SQL injection, XSS, access-control testing, SSRF, tool abuse, RAG security, and similar procedures therefore remain explicit implementation backlog items rather than being represented as finished capabilities.
+The vulnerability catalog remains intentionally broader than the executable procedure set. A module is marked `implemented=True` only when it has a registered handler, deterministic evidence logic, and regression coverage. Riskier classes remain explicitly unimplemented until they have a bounded execution contract and appropriate authorization/configuration gates.
 
-This distinction is intentional: a module name in the catalog is a planned security capability; a registered module with tests and evidence logic is a shipped capability.
+This distinction is intentional: a module name in the catalog is a planned security capability; a registered, tested module with evidence logic is a shipped capability.
