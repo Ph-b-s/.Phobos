@@ -108,20 +108,8 @@ def default_module_registry() -> ModuleRegistry:
         registry.register(module_id, _cross_layer_handler)
 
     from module_adapters import run_indirect_prompt_injection_module, run_nmap_module
-    from standard_modules import (
-        run_web_config,
-        run_web_cookies,
-        run_web_cors,
-        run_web_exposure,
-        run_web_headers,
-        run_web_methods,
-    )
-    from advanced_web_modules import (
-        run_web_api,
-        run_web_info_disclosure,
-        run_web_sqli,
-        run_web_xss,
-    )
+    from standard_modules import run_web_config, run_web_cookies, run_web_cors, run_web_exposure, run_web_headers, run_web_methods
+    from advanced_web_modules import run_web_api, run_web_info_disclosure, run_web_sqli, run_web_xss
     from auth_module import run_web_auth
     from csrf_module import run_web_csrf
     from access_control_module import run_web_access_control
@@ -134,62 +122,37 @@ def default_module_registry() -> ModuleRegistry:
     from ai_data_module import run_ai_data_disclosure
     from ai_boundary_modules import run_ai_output_handling, run_ai_goal_hijacking, run_ai_context_manipulation
     from surface_analysis_modules import (
-        run_web_ssrf,
-        run_web_command_injection,
-        run_web_xxe,
-        run_web_deserialization,
-        run_web_business_logic,
-        run_ai_tool_abuse,
-        run_ai_rag,
-        run_ai_vector,
-        run_ai_data_poisoning,
-        run_ai_unbounded_consumption,
-        run_ai_multi_agent,
+        run_web_ssrf, run_web_command_injection, run_web_xxe, run_web_deserialization, run_web_business_logic,
+        run_ai_tool_abuse, run_ai_rag, run_ai_vector, run_ai_data_poisoning, run_ai_unbounded_consumption, run_ai_multi_agent,
+    )
+    from integration_modules import (
+        run_web_openapi, run_web_open_redirect, run_web_source_maps, run_web_sensitive_inputs,
+        run_ai_memory, run_ai_identity, run_ai_trust_boundary,
     )
 
-    registry.register("web.headers", run_web_headers)
-    registry.register("web.cookies", run_web_cookies)
-    registry.register("web.exposure", run_web_exposure)
-    registry.register("web.methods", run_web_methods)
-    registry.register("web.config", run_web_config)
-    registry.register("web.cors", run_web_cors)
-    registry.register("web.info_disclosure", run_web_info_disclosure)
-    registry.register("web.api", run_web_api)
-    registry.register("web.xss", run_web_xss)
-    registry.register("web.sqli", run_web_sqli)
-    registry.register("web.nosqli", run_web_nosql)
-    registry.register("web.auth", run_web_auth)
-    registry.register("web.csrf", run_web_csrf)
-    registry.register("web.access_control", run_web_access_control)
-    registry.register("web.client_javascript", run_web_client_javascript)
-    registry.register("web.jwt", run_web_jwt)
-    registry.register("web.graphql", run_web_graphql)
-    registry.register("web.ssti", run_web_ssti)
-    registry.register("web.cache", run_web_cache)
-    registry.register("web.host_header", run_web_host_header)
-    registry.register("web.request_smuggling", run_web_request_smuggling)
-    registry.register("web.path_traversal", run_web_path_traversal)
-    registry.register("web.file_upload", run_web_file_upload)
-    registry.register("web.websocket", run_web_websocket)
-    registry.register("web.ssrf", run_web_ssrf)
-    registry.register("web.command_injection", run_web_command_injection)
-    registry.register("web.xxe", run_web_xxe)
-    registry.register("web.deserialization", run_web_deserialization)
-    registry.register("web.business_logic", run_web_business_logic)
-    registry.register("web.nmap", run_nmap_module)
-    registry.register("ai.prompt_injection", run_ai_prompt_injection)
-    registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
-    registry.register("ai.system_prompt", run_ai_system_prompt)
-    registry.register("ai.data_disclosure", run_ai_data_disclosure)
-    registry.register("ai.output_handling", run_ai_output_handling)
-    registry.register("ai.goal_hijacking", run_ai_goal_hijacking)
-    registry.register("ai.context_manipulation", run_ai_context_manipulation)
-    registry.register("ai.tool_abuse", run_ai_tool_abuse)
-    registry.register("ai.rag", run_ai_rag)
-    registry.register("ai.vector", run_ai_vector)
-    registry.register("ai.data_poisoning", run_ai_data_poisoning)
-    registry.register("ai.unbounded_consumption", run_ai_unbounded_consumption)
-    registry.register("ai.multi_agent", run_ai_multi_agent)
+    handlers = {
+        "web.headers": run_web_headers, "web.cookies": run_web_cookies, "web.exposure": run_web_exposure,
+        "web.methods": run_web_methods, "web.config": run_web_config, "web.cors": run_web_cors,
+        "web.info_disclosure": run_web_info_disclosure, "web.api": run_web_api, "web.xss": run_web_xss,
+        "web.sqli": run_web_sqli, "web.nosqli": run_web_nosql, "web.auth": run_web_auth, "web.csrf": run_web_csrf,
+        "web.access_control": run_web_access_control, "web.client_javascript": run_web_client_javascript,
+        "web.jwt": run_web_jwt, "web.graphql": run_web_graphql, "web.ssti": run_web_ssti,
+        "web.cache": run_web_cache, "web.host_header": run_web_host_header, "web.request_smuggling": run_web_request_smuggling,
+        "web.path_traversal": run_web_path_traversal, "web.file_upload": run_web_file_upload, "web.websocket": run_web_websocket,
+        "web.ssrf": run_web_ssrf, "web.command_injection": run_web_command_injection, "web.xxe": run_web_xxe,
+        "web.deserialization": run_web_deserialization, "web.business_logic": run_web_business_logic, "web.nmap": run_nmap_module,
+        "web.openapi": run_web_openapi, "web.open_redirect": run_web_open_redirect, "web.source_maps": run_web_source_maps,
+        "web.sensitive_inputs": run_web_sensitive_inputs,
+        "ai.prompt_injection": run_ai_prompt_injection, "ai.indirect_prompt_injection": run_indirect_prompt_injection_module,
+        "ai.system_prompt": run_ai_system_prompt, "ai.data_disclosure": run_ai_data_disclosure,
+        "ai.output_handling": run_ai_output_handling, "ai.goal_hijacking": run_ai_goal_hijacking,
+        "ai.context_manipulation": run_ai_context_manipulation, "ai.tool_abuse": run_ai_tool_abuse,
+        "ai.rag": run_ai_rag, "ai.vector": run_ai_vector, "ai.data_poisoning": run_ai_data_poisoning,
+        "ai.unbounded_consumption": run_ai_unbounded_consumption, "ai.multi_agent": run_ai_multi_agent,
+        "ai.memory": run_ai_memory, "ai.identity": run_ai_identity, "ai.trust_boundary": run_ai_trust_boundary,
+    }
+    for module_id, handler in handlers.items():
+        registry.register(module_id, handler)
     return registry
 
 
@@ -240,22 +203,11 @@ class ModuleRunner:
                 continue
 
             context = ModuleContext(
-                target=target,
-                assets=tuple(store.assets),
-                knowledge=store,
-                graph=graph,
-                browser=caps.get("browser"),
-                interactor=caps.get("interactor"),
-                accounts=caps.get("accounts"),
-                workflow=caps.get("workflow"),
-                applications=tuple(caps.get("applications", ())),
-                metadata={
-                    **dict(context_metadata or {}),
-                    **dict(caps.get("metadata", {})),
-                    "module_id": module_id,
-                    "module_domain": spec.domain.value,
-                    "module_stage": spec.stage.value,
-                },
+                target=target, assets=tuple(store.assets), knowledge=store, graph=graph,
+                browser=caps.get("browser"), interactor=caps.get("interactor"), accounts=caps.get("accounts"),
+                workflow=caps.get("workflow"), applications=tuple(caps.get("applications", ())),
+                metadata={**dict(context_metadata or {}), **dict(caps.get("metadata", {})), "module_id": module_id,
+                          "module_domain": spec.domain.value, "module_stage": spec.stage.value},
             )
             try:
                 before_observations = {item.id for item in store.observations}
@@ -283,8 +235,7 @@ class ModuleRunner:
                 if self.stop_on_error:
                     break
 
-        return ModuleRun(tuple(executions), store.findings, store.observations,
-                         tuple(all_follow_ups), store, tuple(errors[:MAX_ERRORS_PER_RUN]))
+        return ModuleRun(tuple(executions), store.findings, store.observations, tuple(all_follow_ups), store, tuple(errors[:MAX_ERRORS_PER_RUN]))
 
 
 def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
@@ -295,10 +246,9 @@ def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
     selected = tuple(item for item in analysis.follow_ups if item["module_id"] == module_id)
     observations = tuple(
         SecurityObservation(
-            id=f"{module_id}:{item['correlation_id']}", kind=f"cross_layer.{item['correlation_type']}",
-            source=module_id, description=item["reason"], asset_ids=tuple(item["asset_ids"]),
-            data={"correlation_id": item["correlation_id"], "priority": item["priority"]},
-            confidence=float(item["priority"]),
+            id=f"{module_id}:{item['correlation_id']}", kind=f"cross_layer.{item['correlation_type']}", source=module_id,
+            description=item["reason"], asset_ids=tuple(item["asset_ids"]),
+            data={"correlation_id": item["correlation_id"], "priority": item["priority"]}, confidence=float(item["priority"]),
         ) for item in selected[:MAX_RESULT_ITEMS_PER_MODULE]
     )
     follow_ups = analysis.follow_ups[:MAX_FOLLOW_UPS_PER_RUN] if module_id == "cross_layer.attack_path" else ()
