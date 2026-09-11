@@ -78,6 +78,19 @@ class _Interactor:
         return _Snapshot("same protected object content")
 
 
+class _Response:
+    def __init__(self, status, text):
+        self.status = status
+        self.text = text
+
+
+class _Requests:
+    def request(self, method, url, *, headers, body):
+        assert method == "POST"
+        assert url == "https://example.com/api/graphql"
+        return _Response(200, '{"data":{"viewer":{"id":"same"}}}')
+
+
 def test_object_authorization_compares_explicit_owned_and_peer_objects():
     engine = WorkflowEngine()
     engine.register_action("noop", lambda context, step: None)
@@ -85,3 +98,31 @@ def test_object_authorization_compares_explicit_owned_and_peer_objects():
     result = default_module_registry().get("web.object_authorization")(_context((), metadata, _Interactor(), object(), engine))
     assert result.observations
     assert result.findings[0].type == "potential_idor_object_authorization_failure"
+
+
+def test_configured_graphql_auth_compares_low_high_read_only_requests():
+    metadata = {
+        "graphql_auth": {
+            "endpoints": ["https://example.com/api/graphql"],
+            "query": "query Viewer { viewer { id } }",
+            "low_headers": {"Authorization": "Bearer LOW"},
+            "high_headers": {"Authorization": "Bearer HIGH"},
+        },
+        "request_manager": _Requests(),
+    }
+    result = default_module_registry().get("web.graphql_auth_surface")(_context((), metadata))
+    assert result.observations
+    assert result.findings[0].type == "potential_graphql_authorization_failure"
+
+
+def test_configured_graphql_auth_rejects_mutations():
+    metadata = {
+        "graphql_auth": {"endpoints": ["https://example.com/api/graphql"], "query": "mutation Update { updateUser { id } }"},
+        "request_manager": _Requests(),
+    }
+    try:
+        default_module_registry().get("web.graphql_auth_surface")(_context((), metadata))
+    except ValueError as exc:
+        assert "read-only" in str(exc)
+    else:
+        raise AssertionError("mutation query was not rejected")
