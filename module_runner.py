@@ -116,6 +116,12 @@ def default_module_registry() -> ModuleRegistry:
         run_web_headers,
         run_web_methods,
     )
+    from advanced_web_modules import (
+        run_web_api,
+        run_web_info_disclosure,
+        run_web_sqli,
+        run_web_xss,
+    )
 
     registry.register("web.headers", run_web_headers)
     registry.register("web.cookies", run_web_cookies)
@@ -123,6 +129,10 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("web.methods", run_web_methods)
     registry.register("web.config", run_web_config)
     registry.register("web.cors", run_web_cors)
+    registry.register("web.info_disclosure", run_web_info_disclosure)
+    registry.register("web.api", run_web_api)
+    registry.register("web.xss", run_web_xss)
+    registry.register("web.sqli", run_web_sqli)
     registry.register("web.nmap", run_nmap_module)
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
     return registry
