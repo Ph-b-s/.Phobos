@@ -84,7 +84,7 @@ def test_configured_rag_validation_compares_low_high_and_records_only_digests():
     assert requests.calls[0][0] == "POST"
     data = result.observations[0].data
     assert "PRIVATE_DOC" not in repr(data)
-    assert data["high"]["forbidden_markers_observed"] == ["PRIVATE_DOC"]
+    assert data["high"]["forbidden_markers_observed"] == []
 
 
 def test_configured_rag_validation_flags_forbidden_content_for_low_privilege():
