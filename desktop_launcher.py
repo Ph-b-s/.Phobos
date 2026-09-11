@@ -21,6 +21,7 @@ class DesktopController:
         self._subtitle = window.findChild(QtWidgets.QLabel, "page_subtitle")
         window.nav_scan.clicked.connect(self.show_new_scan)
         window.nav_scans.clicked.connect(self.show_scans)
+        window.nav_findings.clicked.connect(self.show_findings)
         window.nav_modules.clicked.connect(self.show_modules)
         window.nav_settings.clicked.connect(self.show_settings)
 
@@ -67,6 +68,61 @@ class DesktopController:
         except (OSError, ValueError, TypeError) as exc:
             self.window.activity.setPlainText(f"Unable to read scan history: {type(exc).__name__}: {exc}")
             self.window.statusBar().showMessage("History error")
+
+    def show_findings(self) -> None:
+        self._page("Findings", "Evidence-backed results from the latest local scan")
+        path = Path(".phobos") / "findings.json"
+        self.window.activity.clear()
+        if not path.exists():
+            self.window.activity.setPlainText("No findings are stored yet.\n\nRun a scan to populate the findings explorer.")
+            self.window.statusBar().showMessage("No findings")
+            return
+        try:
+            findings = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(findings, list):
+                raise ValueError("findings.json must contain a list")
+        except (OSError, ValueError, TypeError) as exc:
+            self.window.activity.setPlainText(f"Unable to read findings: {type(exc).__name__}: {exc}")
+            self.window.statusBar().showMessage("Findings error")
+            return
+
+        dialog = QtWidgets.QDialog(self.window)
+        dialog.setWindowTitle("Phobos Findings")
+        dialog.resize(980, 620)
+        layout = QtWidgets.QVBoxLayout(dialog)
+        list_widget = QtWidgets.QListWidget()
+        detail = QtWidgets.QPlainTextEdit()
+        detail.setReadOnly(True)
+        for item in findings[:256]:
+            severity = str(item.get("metadata", {}).get("severity", "unknown")).upper()
+            finding_type = str(item.get("type", "unknown"))
+            confidence = item.get("confidence", "?")
+            list_widget.addItem(f"[{severity}] {finding_type} · confidence {confidence}")
+
+        def select(index: int) -> None:
+            if not 0 <= index < len(findings):
+                detail.clear()
+                return
+            item = findings[index]
+            metadata = item.get("metadata", {}) if isinstance(item.get("metadata"), dict) else {}
+            evidence = item.get("evidence", []) if isinstance(item.get("evidence"), list) else []
+            detail.setPlainText(json.dumps({
+                "id": item.get("id"),
+                "type": item.get("type"),
+                "confidence": item.get("confidence"),
+                "severity": metadata.get("severity"),
+                "status": metadata.get("status"),
+                "evidence": evidence,
+                "metadata": metadata,
+            }, indent=2, ensure_ascii=False))
+
+        list_widget.currentRowChanged.connect(select)
+        layout.addWidget(list_widget, 2)
+        layout.addWidget(detail, 1)
+        if findings:
+            list_widget.setCurrentRow(0)
+        dialog.exec()
+        self.window.statusBar().showMessage(f"{len(findings)} findings loaded")
 
     def show_modules(self) -> None:
         self._page("Security modules", "Registered capabilities available to the engine")
