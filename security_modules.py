@@ -78,7 +78,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.exposure", "Common exposure", "Check for common exposed files, debug surfaces, and sensitive endpoints.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.methods", "HTTP methods", "Test unusual or dangerous HTTP method exposure.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.auth", "Authentication", "Execute an authorized browser workflow to establish and observe an authenticated session.", ModuleDomain.WEB, active=True, implemented=True, tool="playwright"),
-    ModuleSpec("web.access_control", "Access control", "Test authorization boundaries, IDOR, privilege escalation, and object access.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.access_control", "Access control", "Compare explicitly configured low/high privilege workflows against the same protected resources.", ModuleDomain.WEB, active=True, implemented=True, tool="playwright"),
     ModuleSpec("web.injection", "Generic injection", "Select and coordinate injection procedures for discovered inputs.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.xss", "Cross-site scripting", "Test reflected, stored, and DOM XSS surfaces.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.sqli", "SQL injection", "Test database-backed inputs for SQL injection conditions.", ModuleDomain.WEB, active=True, implemented=True),
