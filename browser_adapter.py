@@ -9,7 +9,7 @@ imported lazily.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, Mapping, Sequence
 from urllib.parse import urlsplit, urlunsplit
 
 from ai_testing import Observation
@@ -18,6 +18,9 @@ from scope import ScopeError, ScopeValidator
 MAX_NETWORK_RECORDS = 2_000
 MAX_DOM_TEXT = 200_000
 MAX_SCRIPT_RESULT = 50_000
+MAX_WEBSOCKET_PROTOCOLS = 8
+MAX_WEBSOCKET_HEADER_VALUE = 8_000
+MAX_WEBSOCKET_TIMEOUT_MS = 15_000
 
 
 class BrowserAdapterError(RuntimeError):
@@ -110,6 +113,7 @@ class BrowserSession(Protocol):
     def click(self, selector: str) -> None: ...
     def snapshot(self) -> BrowserPageSnapshot: ...
     def run_probe(self, script: str) -> Any: ...
+    def websocket_handshake(self, url: str, *, headers: Mapping[str, str] | None = None, protocols: Sequence[str] = ()) -> Mapping[str, Any]: ...
     def network_observations(self) -> tuple[Observation, ...]: ...
     def close(self) -> None: ...
 
@@ -123,6 +127,35 @@ def _safe_url(url: str) -> str:
 def _bounded_string(value: Any, *, limit: int) -> str:
     text = str(value)
     return text[:limit]
+
+
+def _validate_websocket_headers(headers: Mapping[str, str] | None) -> dict[str, str]:
+    if headers is None:
+        return {}
+    if not isinstance(headers, Mapping):
+        raise TypeError("WebSocket headers must be an object")
+    blocked = {"host", "connection", "upgrade", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"}
+    result: dict[str, str] = {}
+    for key, value in headers.items():
+        name = str(key).strip()
+        lowered = name.casefold()
+        if not name or len(name) > 128:
+            raise ValueError("WebSocket header name is invalid")
+        if lowered in blocked or lowered.startswith("proxy-"):
+            raise ValueError(f"WebSocket header is controlled by the browser: {name}")
+        result[name] = str(value)[:MAX_WEBSOCKET_HEADER_VALUE]
+    return result
+
+
+def _validate_websocket_protocols(protocols: Sequence[str]) -> tuple[str, ...]:
+    if isinstance(protocols, (str, bytes, bytearray)):
+        raise TypeError("WebSocket protocols must be a sequence of strings")
+    result = tuple(str(item).strip() for item in protocols if str(item).strip())
+    if len(result) > MAX_WEBSOCKET_PROTOCOLS:
+        raise ValueError("too many WebSocket subprotocols")
+    if any(len(item) > 256 for item in result):
+        raise ValueError("WebSocket subprotocol exceeds size limit")
+    return result
 
 
 class PlaywrightBrowserSession:
@@ -326,6 +359,89 @@ class PlaywrightBrowserSession:
         if isinstance(result, dict):
             return {str(k): v for k, v in list(result.items())[:500]}
         return result
+
+    def websocket_handshake(self, url: str, *, headers: Mapping[str, str] | None = None, protocols: Sequence[str] = ()) -> Mapping[str, Any]:
+        """Open and immediately close one explicit WebSocket without sending data."""
+        if self._context is None or self._browser is None:
+            raise BrowserAdapterError("browser session is not initialized")
+        if not isinstance(url, str) or not url.strip():
+            raise ValueError("WebSocket URL must not be empty")
+        parsed = urlsplit(url.strip())
+        if parsed.scheme.lower() not in {"ws", "wss"}:
+            raise ValueError("WebSocket URL must use ws:// or wss://")
+        validated = self.scope.validate(url)
+        safe_headers = _validate_websocket_headers(headers)
+        safe_protocols = _validate_websocket_protocols(protocols)
+        timeout_ms = min(self.limits.navigation_timeout_ms, MAX_WEBSOCKET_TIMEOUT_MS)
+
+        page = None
+        context = None
+        try:
+            cookies = self._context.cookies(validated)
+            context = self._browser.new_context(
+                extra_http_headers=safe_headers,
+                service_workers="block",
+            )
+            if cookies:
+                context.add_cookies(cookies)
+            page = context.new_page()
+            result = page.evaluate(
+                """
+                async ({url, protocols, timeoutMs}) => {
+                    return await new Promise((resolve) => {
+                        let settled = false;
+                        const finish = (payload) => {
+                            if (settled) return;
+                            settled = true;
+                            resolve(payload);
+                        };
+                        let socket;
+                        try {
+                            socket = new WebSocket(url, protocols);
+                        } catch (error) {
+                            finish({state: "constructor_error", detail: String(error?.name || "WebSocketError")});
+                            return;
+                        }
+                        const timer = setTimeout(() => {
+                            try { socket.close(); } catch (_) {}
+                            finish({state: "timeout"});
+                        }, timeoutMs);
+                        socket.addEventListener("open", () => {
+                            clearTimeout(timer);
+                            try { socket.close(1000, "phobos-handshake-only"); } catch (_) {}
+                            finish({state: "open"});
+                        }, {once: true});
+                        socket.addEventListener("error", () => {
+                            clearTimeout(timer);
+                            finish({state: "error"});
+                        }, {once: true});
+                    });
+                }
+                """,
+                {"url": validated, "protocols": list(safe_protocols), "timeoutMs": timeout_ms},
+            )
+            if not isinstance(result, dict):
+                raise BrowserAdapterError("browser returned an invalid WebSocket handshake result")
+            return {
+                "url": _safe_url(validated),
+                "state": _bounded_string(result.get("state", "error"), limit=32),
+                "protocols": list(safe_protocols),
+            }
+        except (ScopeError, BrowserAdapterError, ValueError):
+            raise
+        except Exception as exc:
+            return {"url": _safe_url(validated), "state": "exception", "error_type": type(exc).__name__[:64], "protocols": list(safe_protocols)}
+        finally:
+            if page is not None:
+                try:
+                    page.close()
+                except Exception:
+                    pass
+            if context is not None:
+                try:
+                    context.close()
+                except Exception:
+                    pass
 
     def network_observations(self) -> tuple[Observation, ...]:
         return tuple(record.to_observation() for record in self._records)
