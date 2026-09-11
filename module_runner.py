@@ -108,7 +108,21 @@ def default_module_registry() -> ModuleRegistry:
         registry.register(module_id, _cross_layer_handler)
 
     from module_adapters import run_indirect_prompt_injection_module, run_nmap_module
+    from standard_modules import (
+        run_web_config,
+        run_web_cookies,
+        run_web_cors,
+        run_web_exposure,
+        run_web_headers,
+        run_web_methods,
+    )
 
+    registry.register("web.headers", run_web_headers)
+    registry.register("web.cookies", run_web_cookies)
+    registry.register("web.exposure", run_web_exposure)
+    registry.register("web.methods", run_web_methods)
+    registry.register("web.config", run_web_config)
+    registry.register("web.cors", run_web_cors)
     registry.register("web.nmap", run_nmap_module)
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
     return registry
@@ -160,13 +174,24 @@ class ModuleRunner:
                 executions.append(ModuleExecution(module_id, "unimplemented"))
                 continue
 
-            context = ModuleContext(target=target, assets=tuple(store.assets), knowledge=store, graph=graph,
-                                    browser=caps.get("browser"), interactor=caps.get("interactor"),
-                                    accounts=caps.get("accounts"), workflow=caps.get("workflow"),
-                                    applications=tuple(caps.get("applications", ())),
-                                    metadata={**dict(context_metadata or {}), **dict(caps.get("metadata", {})),
-                                              "module_id": module_id,
-                                              "module_domain": spec.domain.value, "module_stage": spec.stage.value})
+            context = ModuleContext(
+                target=target,
+                assets=tuple(store.assets),
+                knowledge=store,
+                graph=graph,
+                browser=caps.get("browser"),
+                interactor=caps.get("interactor"),
+                accounts=caps.get("accounts"),
+                workflow=caps.get("workflow"),
+                applications=tuple(caps.get("applications", ())),
+                metadata={
+                    **dict(context_metadata or {}),
+                    **dict(caps.get("metadata", {})),
+                    "module_id": module_id,
+                    "module_domain": spec.domain.value,
+                    "module_stage": spec.stage.value,
+                },
+            )
             try:
                 before_observations = {item.id for item in store.observations}
                 before_findings = {item.id for item in store.findings}
@@ -179,9 +204,13 @@ class ModuleRunner:
                 if len(result.follow_ups) > available:
                     raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
-                executions.append(ModuleExecution(module_id, "completed",
+                executions.append(ModuleExecution(
+                    module_id,
+                    "completed",
                     sum(item.id not in before_observations for item in result.observations),
-                    sum(item.id not in before_findings for item in result.findings), len(result.follow_ups)))
+                    sum(item.id not in before_findings for item in result.findings),
+                    len(result.follow_ups),
+                ))
             except Exception as exc:
                 message = f"{module_id}: {type(exc).__name__}: {exc}"
                 if len(errors) < MAX_ERRORS_PER_RUN:
