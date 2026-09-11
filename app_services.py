@@ -121,6 +121,10 @@ def execute_scan(
         "accounts": services.accounts,
         "workflow": services.workflows,
         "applications": services.applications,
+        "metadata": {
+            "scope": services.scope,
+            "request_manager": services.requests,
+        },
     }
     return execute_plan(
         services.target,
