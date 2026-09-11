@@ -9,6 +9,10 @@ class FakeResponse:
     headers = {"content-type": "text/html"}
     body = b"ok"
 
+    @property
+    def text(self):
+        return self.body.decode()
+
 
 class FakeRequests:
     def get(self, url, *, headers=None):
@@ -42,4 +46,6 @@ def test_execute_plan_reuses_shared_knowledge_state():
 def test_planner_context_exposes_only_implemented_modules():
     context = build_planner_context("https://example.com", KnowledgeStore(), completed_modules=())
     assert "web.headers" in context
-    assert "web.sqli" not in context
+    assert "web.sqli" in context
+    assert "web.xss" in context
+    assert "web.access_control" not in context
