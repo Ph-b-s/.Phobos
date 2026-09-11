@@ -48,11 +48,15 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("web.api", "baseline discovered API behavior"),
         ModuleSelection("web.xss", "probe reflected HTML injection with a harmless canary"),
         ModuleSelection("web.sqli", "probe for non-destructive SQL error signals"),
+        ModuleSelection("web.nosqli", "probe query parameters for bounded NoSQL operator differentials"),
         ModuleSelection("web.csrf", "assess discovered state-changing forms for CSRF protection signals"),
         ModuleSelection("web.client_javascript", "inspect discovered JavaScript for risky source/sink combinations"),
         ModuleSelection("web.jwt", "inspect discovered JWT-like tokens for unsafe algorithm signals"),
         ModuleSelection("web.graphql", "assess discovered GraphQL endpoints with bounded read-only introspection"),
         ModuleSelection("web.ssti", "probe arithmetic-only template expressions for evaluation signals"),
+        ModuleSelection("web.path_traversal", "probe GET parameters with a nonexistent traversal marker"),
+        ModuleSelection("web.file_upload", "passively assess discovered upload validation signals"),
+        ModuleSelection("web.websocket", "discover WebSocket endpoints without connecting"),
         ModuleSelection("web.cache", "inspect cache policy and untrusted-input reflection signals"),
         ModuleSelection("web.host_header", "inspect Host-header trust behavior without changing state"),
         ModuleSelection("cross_layer.web_to_ai", "correlate Web inputs with AI surfaces"),
@@ -64,7 +68,7 @@ def default_module_selection(*, include_nmap: bool = False, include_indirect_ai:
         ModuleSelection("cross_layer.attack_path", "rank cross-layer attack paths"),
     ]
     if include_indirect_ai:
-        selected.insert(15, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
+        selected.insert(21, ModuleSelection("ai.indirect_prompt_injection", "run configured indirect-injection assessment"))
     if include_nmap:
         selected.append(ModuleSelection("web.nmap", "supplemental web-facing service vulnerability check"))
     return validate_plan(ScanPlan(tuple(selected), source="default"))
