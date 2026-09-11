@@ -93,7 +93,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.deserialization", "Deserialization", "Identify likely serialization/deserialization surfaces; active payload testing remains gated.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.cors", "CORS", "Test cross-origin policy and credential exposure.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.cache", "Web cache attacks", "Inspect cache policy and untrusted-input reflection signals without poisoning the cache.", ModuleDomain.WEB, active=True, implemented=True),
-    ModuleSpec("web.request_smuggling", "Request smuggling", "Test front-end/back-end HTTP parsing inconsistencies.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.request_smuggling", "Request smuggling", "Inspect HTTP framing and proxy indicators without sending ambiguous parsing payloads.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.host_header", "Host header attacks", "Inspect whether an untrusted Host header influences redirects or response content.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.jwt", "JWT security", "Inspect discovered JWT-like tokens for unsafe algorithm signals without retaining token material.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.graphql", "GraphQL security", "Assess discovered GraphQL endpoints with bounded read-only introspection.", ModuleDomain.WEB, active=True, implemented=True),
