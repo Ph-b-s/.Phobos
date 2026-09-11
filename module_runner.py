@@ -125,6 +125,7 @@ def default_module_registry() -> ModuleRegistry:
     from auth_module import run_web_auth
     from csrf_module import run_web_csrf
     from access_control_module import run_web_access_control
+    from web_analysis_modules import run_web_client_javascript, run_web_graphql, run_web_jwt
 
     registry.register("web.headers", run_web_headers)
     registry.register("web.cookies", run_web_cookies)
@@ -139,6 +140,9 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("web.auth", run_web_auth)
     registry.register("web.csrf", run_web_csrf)
     registry.register("web.access_control", run_web_access_control)
+    registry.register("web.client_javascript", run_web_client_javascript)
+    registry.register("web.jwt", run_web_jwt)
+    registry.register("web.graphql", run_web_graphql)
     registry.register("web.nmap", run_nmap_module)
     registry.register("ai.indirect_prompt_injection", run_indirect_prompt_injection_module)
     return registry
