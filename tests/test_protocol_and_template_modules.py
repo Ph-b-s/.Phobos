@@ -50,3 +50,11 @@ def test_cache_module_records_missing_policy():
     requests = FakeRequests(lambda method, url, headers, body: FakeResponse("ok", headers={}))
     result = default_module_registry().get("web.cache")(_context(requests, "https://example.com/"))
     assert any(item.type == "missing_explicit_cache_policy" for item in result.findings)
+
+
+def test_request_smuggling_records_ambiguous_framing_without_payload():
+    requests = FakeRequests(lambda method, url, headers, body: FakeResponse(
+        "ok", headers={"Transfer-Encoding": "chunked", "Content-Length": "12"}
+    ))
+    result = default_module_registry().get("web.request_smuggling")(_context(requests, "https://example.com/"))
+    assert any(item.type == "ambiguous_http_framing_headers" for item in result.findings)
