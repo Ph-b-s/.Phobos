@@ -34,25 +34,23 @@ def _params(url: str):
     return tuple(dict.fromkeys(name for name, _ in parse_qsl(urlsplit(url).query, keep_blank_values=True)))[:MAX_PARAMS]
 
 
-def _variant(url: str, parameter: str, value: object) -> str:
-    parsed = urlsplit(url)
-    if isinstance(value, dict):
-        encoded = json.dumps(value, separators=(",", ":"))
-    else:
-        encoded = str(value)
-    pairs = [(name, encoded if name == parameter else current) for name, current in parse_qsl(parsed.query, keep_blank_values=True)]
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.fragment if False else urlencode_pairs(pairs), ""))
-
-
 def urlencode_pairs(pairs):
     return "&".join(f"{quote(name, safe='')}={quote(value, safe='')}" for name, value in pairs)
+
+
+def _variant(url: str, parameter: str, value: object) -> str:
+    parsed = urlsplit(url)
+    encoded = json.dumps(value, separators=(",", ":")) if isinstance(value, dict) else str(value)
+    pairs = [(name, encoded if name == parameter else current)
+             for name, current in parse_qsl(parsed.query, keep_blank_values=True)]
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", urlencode_pairs(pairs), parsed.fragment))
 
 
 def _id(prefix: str, asset_id: str, parameter: str, probe: str = "") -> str:
     return f"{prefix}:{sha256(f'{asset_id}:{parameter}:{probe}'.encode()).hexdigest()[:12]}"
 
 
-def run_web_nosqli(context):
+def run_web_nosql(context):
     from module_runner import ModuleResult
 
     requests = _requests(context)
