@@ -75,6 +75,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Bounded follow-up candidates
 - [x] Separate confidence from severity
 - [x] Cross-layer module runner integration
+- [x] AI/Web identifier trust-boundary follow-up signals
 
 ## Web Security Procedures
 
@@ -88,6 +89,10 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] CORS policy checks
 - [x] Information-disclosure pattern detection with evidence redaction
 - [x] API baseline analysis
+- [x] OpenAPI/Swagger surface discovery
+- [x] Redirect-parameter/open-redirect candidate discovery
+- [x] JavaScript source-map exposure discovery
+- [x] Sensitive input-name inventory without value storage
 - [x] Reflected XSS signal detection
 - [x] Error-based SQL injection signal detection
 - [x] Bounded NoSQL operator differential testing
@@ -116,7 +121,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] Active XXE validation
 - [ ] Active unsafe-deserialization validation
 - [ ] Cache poisoning/deception confirmation
-- [ ] HTTP request smuggling
+- [ ] HTTP request smuggling confirmation
 - [ ] JWT signing/claim validation beyond passive analysis
 - [ ] GraphQL authorization/query abuse testing
 - [ ] Active WebSocket authentication/authorization/message testing
@@ -141,6 +146,9 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Untrusted AI-context source discovery
 - [x] AI resource-control visibility analysis
 - [x] Multi-agent surface discovery
+- [x] AI memory/persistent-context surface discovery
+- [x] AI identity/privilege boundary discovery
+- [x] AI/Web trust-boundary identifier correlation
 
 ### Remaining major procedures
 
