@@ -3,7 +3,6 @@
 This document records the implementation state of the product roadmap on the `flat-structure` branch.
 
 ## Phase 1 — Foundation
-
 - [x] CLI and configuration
 - [x] Central scope validation
 - [x] Scope-aware HTTP transport with redirect re-validation and DNS pinning
@@ -15,7 +14,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Optional local Mistral planning runtime
 
 ## Phase 2 — Web Recon
-
 - [x] HTML crawling
 - [x] Endpoint discovery
 - [x] Form/input discovery
@@ -26,7 +24,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Cross-application candidate discovery
 
 ## Phase 3 — AI Discovery
-
 - [x] Passive AI endpoint detection
 - [x] Provider hints
 - [x] Agent/tool hints
@@ -35,7 +32,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] AI evidence carried into the shared knowledge store
 
 ## Phase 4 — Controlled AI Testing
-
 - [x] Assessment procedure abstraction
 - [x] Bounded assessment engine
 - [x] Evidence-driven analyzer
@@ -50,7 +46,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Browser-backed execution adapter
 
 ## Phase 5 — Indirect Injection Tracking
-
 - [x] Unique canary generation/validation
 - [x] Controlled content seeding
 - [x] Baseline vs induced comparison
@@ -59,7 +54,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Structured findings and evidence
 
 ## Phase 6 — Execution Graph
-
 - [x] Typed graph nodes and edges
 - [x] Web/AI relationship modelling
 - [x] Bounded path discovery
@@ -68,7 +62,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Cross-layer observations attached to graph assets
 
 ## Phase 7 — Chaining Engine
-
 - [x] Web → AI path correlation
 - [x] AI → Web path correlation
 - [x] Finding/evidence bridges
@@ -76,11 +69,12 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Separate confidence from severity
 - [x] Cross-layer module runner integration
 - [x] AI/Web identifier trust-boundary follow-up signals
+- [x] Tool/RAG authorization and data-flow follow-up signals
+- [x] Object-authorization findings feeding shared evidence state
 
 ## Web Security Procedures
 
 ### Implemented
-
 - [x] Security headers baseline
 - [x] Cookie security baseline
 - [x] Common exposure checks
@@ -100,14 +94,17 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Client-side JavaScript source/sink analysis
 - [x] JWT-like token analysis with token redaction
 - [x] GraphQL introspection analysis
+- [x] GraphQL authorization-sensitive surface discovery
 - [x] Low-impact SSTI arithmetic probes
 - [x] Host-header trust signal analysis
 - [x] Cache-policy / untrusted-reflection analysis
 - [x] Configured authentication workflow bootstrap
 - [x] Configured low/high-privilege authorization comparison
+- [x] Configured object-level authorization comparison for explicit owned/peer pairs
 - [x] Bounded path-traversal marker checks
 - [x] Passive file-upload validation analysis
 - [x] WebSocket endpoint discovery without active message exchange
+- [x] WebSocket authentication-signal inventory
 - [x] SSRF sink discovery
 - [x] Command-execution sink discovery
 - [x] XML-processing surface discovery
@@ -115,7 +112,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Business-logic workflow candidate discovery
 
 ### Remaining major procedures
-
 - [ ] Active SSRF validation
 - [ ] Active command-injection validation
 - [ ] Active XXE validation
@@ -123,16 +119,15 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] Cache poisoning/deception confirmation
 - [ ] HTTP request smuggling confirmation
 - [ ] JWT signing/claim validation beyond passive analysis
-- [ ] GraphQL authorization/query abuse testing
+- [ ] GraphQL authorization/query abuse testing beyond the new surface mapping
 - [ ] Active WebSocket authentication/authorization/message testing
 - [ ] Race-condition testing
 - [ ] Business-logic workflow abuse
-- [ ] Full authorization/IDOR object-level testing beyond configured response comparison
+- [ ] Full authorization/IDOR object-level testing beyond explicitly configured object-pair comparison
 
 ## AI Security Procedures
 
 ### Implemented
-
 - [x] Direct prompt-injection canary procedure
 - [x] Indirect prompt-injection procedure
 - [x] System-prompt marker disclosure procedure
@@ -149,9 +144,9 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] AI memory/persistent-context surface discovery
 - [x] AI identity/privilege boundary discovery
 - [x] AI/Web trust-boundary identifier correlation
+- [x] Tool/RAG compound trust-boundary discovery
 
 ### Remaining major procedures
-
 - [ ] Active tool-abuse validation
 - [ ] Active excessive-agency validation
 - [ ] Active RAG authorization/grounding testing
@@ -162,7 +157,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] Full sensitive-information disclosure testing beyond configured markers
 
 ## Productization
-
 - [x] Human-readable Markdown report
 - [x] Deterministic scan summarizer
 - [x] Iterative AI planner with a hard iteration cap
@@ -174,4 +168,4 @@ This document records the implementation state of the product roadmap on the `fl
 
 ## Important implementation boundary
 
-The vulnerability catalog intentionally distinguishes **surface identification** from **active vulnerability confirmation**. Passive modules may identify a high-value sink and create a bounded follow-up signal without claiming exploitation. A module is marked `implemented=True` only when it has a registered handler, deterministic evidence logic, and regression coverage.
+The vulnerability catalog intentionally distinguishes **surface identification** from **active vulnerability confirmation**. Passive modules may identify a high-value sink and create a bounded follow-up signal without claiming exploitation. A module is marked `implemented=True` only when it has a registered handler, deterministic evidence logic, and regression coverage. Configuration-dependent authorization modules never invent credentials, selectors, object identifiers, or privilege assumptions.
