@@ -33,12 +33,10 @@ def _targets(context):
 def run_web_host_header(context):
     """Detect obvious Host-derived absolute URL behavior using a canary host."""
     from module_runner import ModuleResult
-
     requests = _requests(context)
     observations: list[SecurityObservation] = []
     findings: list[Finding] = []
     canary = "phobos-invalid.example"
-
     for asset in _targets(context):
         try:
             baseline = requests.get(asset.url)
@@ -50,24 +48,16 @@ def run_web_host_header(context):
         reflected = canary in location or canary in body
         oid = _id("web.host_header.observation", asset.id)
         observations.append(SecurityObservation(
-            id=oid,
-            kind="web.host_header.trust_signal",
-            source="web.host_header",
-            description=f"Host-header trust behavior inspected for {_safe_url(asset.url)}",
-            asset_ids=(asset.id,),
+            id=oid, kind="web.host_header.trust_signal", source="web.host_header",
+            description=f"Host-header trust behavior inspected for {_safe_url(asset.url)}", asset_ids=(asset.id,),
             data={"baseline_status": baseline.status, "probe_status": probe.status,
-                  "canary_reflected": reflected, "location_present": bool(location)},
-            confidence=0.9,
+                  "canary_reflected": reflected, "location_present": bool(location)}, confidence=0.9,
         ))
         if reflected:
             findings.append(Finding(
-                id=_id("web.host_header.finding", asset.id),
-                type="potential_host_header_trust_issue",
-                confidence=0.72,
-                evidence=(oid,),
-                metadata={"severity": "medium", "url": _safe_url(asset.url),
-                          "status": "needs_context_confirmation",
-                          "validation": "attacker-controlled Host canary appeared in redirect or response content"},
+                id=_id("web.host_header.finding", asset.id), type="potential_host_header_trust_issue", confidence=0.72,
+                evidence=(oid,), metadata={"severity": "medium", "url": _safe_url(asset.url),
+                "status": "needs_context_confirmation", "validation": "Host canary appeared in redirect or response content"},
             ))
     return ModuleResult(observations=tuple(observations), findings=tuple(findings))
 
@@ -75,12 +65,10 @@ def run_web_host_header(context):
 def run_web_cache(context):
     """Inspect cache-control and cache-key signals without attempting cache poisoning."""
     from module_runner import ModuleResult
-
     requests = _requests(context)
     observations: list[SecurityObservation] = []
     findings: list[Finding] = []
     probe_headers = {"X-Phobos-Cache-Probe": "1"}
-
     for asset in _targets(context):
         try:
             baseline = requests.get(asset.url)
@@ -92,30 +80,62 @@ def run_web_cache(context):
         probe_hit = "x-phobos-cache-probe" in probe.text[:10_000].lower()
         oid = _id("web.cache.observation", asset.id)
         observations.append(SecurityObservation(
-            id=oid,
-            kind="web.cache.policy",
-            source="web.cache",
-            description=f"Cache behavior inspected for {_safe_url(asset.url)}",
-            asset_ids=(asset.id,),
+            id=oid, kind="web.cache.policy", source="web.cache",
+            description=f"Cache behavior inspected for {_safe_url(asset.url)}", asset_ids=(asset.id,),
             data={"cache_control": cache_control, "vary": vary, "probe_status": probe.status,
-                  "probe_marker_reflected": probe_hit},
-            confidence=0.92,
+                  "probe_marker_reflected": probe_hit}, confidence=0.92,
         ))
         if probe_hit:
             findings.append(Finding(
-                id=_id("web.cache.finding", asset.id, "reflection"),
-                type="potential_cache_key_untrusted_input_reflection",
-                confidence=0.74,
-                evidence=(oid,),
-                metadata={"severity": "medium", "url": _safe_url(asset.url),
-                          "status": "needs_context_confirmation"},
+                id=_id("web.cache.finding", asset.id, "reflection"), type="potential_cache_key_untrusted_input_reflection",
+                confidence=0.74, evidence=(oid,), metadata={"severity": "medium", "url": _safe_url(asset.url),
+                "status": "needs_context_confirmation"},
             ))
         if baseline.status == 200 and not cache_control:
             findings.append(Finding(
-                id=_id("web.cache.finding", asset.id, "policy"),
-                type="missing_explicit_cache_policy",
-                confidence=0.61,
-                evidence=(oid,),
-                metadata={"severity": "informational", "url": _safe_url(asset.url)},
+                id=_id("web.cache.finding", asset.id, "policy"), type="missing_explicit_cache_policy", confidence=0.61,
+                evidence=(oid,), metadata={"severity": "informational", "url": _safe_url(asset.url)},
+            ))
+    return ModuleResult(observations=tuple(observations), findings=tuple(findings))
+
+
+def run_web_request_smuggling(context):
+    """Record parser/cache indicators without sending ambiguous CL/TE requests."""
+    from module_runner import ModuleResult
+    requests = _requests(context)
+    observations: list[SecurityObservation] = []
+    findings: list[Finding] = []
+    for asset in _targets(context):
+        try:
+            response = requests.get(asset.url)
+        except Exception:
+            continue
+        transfer = response.headers.get("transfer-encoding", "")
+        content_length = response.headers.get("content-length", "")
+        connection = response.headers.get("connection", "")
+        via = response.headers.get("via", "")
+        proxy_hints = bool(via or response.headers.get("x-cache") or response.headers.get("cf-cache-status"))
+        conflicting = bool(transfer.strip() and content_length.strip())
+        oid = _id("web.request_smuggling.observation", asset.id)
+        observations.append(SecurityObservation(
+            id=oid, kind="web.request_smuggling.protocol", source="web.request_smuggling",
+            description=f"HTTP parser indicators inspected for {_safe_url(asset.url)}", asset_ids=(asset.id,),
+            data={"transfer_encoding_present": bool(transfer.strip()), "content_length_present": bool(content_length.strip()),
+                  "conflicting_framing_headers": conflicting, "proxy_hints": proxy_hints,
+                  "connection": connection[:100]}, confidence=0.88,
+        ))
+        if conflicting:
+            findings.append(Finding(
+                id=_id("web.request_smuggling.finding", asset.id, "framing"),
+                type="ambiguous_http_framing_headers", confidence=0.76, evidence=(oid,),
+                metadata={"severity": "medium", "url": _safe_url(asset.url),
+                          "status": "requires_frontend_backend_parser_validation"},
+            ))
+        elif proxy_hints:
+            findings.append(Finding(
+                id=_id("web.request_smuggling.finding", asset.id, "proxy"),
+                type="multiple_http_layer_indicators", confidence=0.42, evidence=(oid,),
+                metadata={"severity": "informational", "url": _safe_url(asset.url),
+                          "status": "surface_identified_no_smuggling_payload_sent"},
             ))
     return ModuleResult(observations=tuple(observations), findings=tuple(findings))
