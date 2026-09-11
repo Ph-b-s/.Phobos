@@ -22,12 +22,14 @@ phobos-desktop = "desktop_app:main"
 [tool.setuptools]
 py-modules = [
     "account_manager",
+    "advanced_web_modules",
     "ai",
     "ai_setup",
     "ai_surface",
     "ai_testing",
     "app_services",
     "assessment_engine",
+    "auth_module",
     "browser_adapter",
     "browser_interaction",
     "cli",
