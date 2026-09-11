@@ -1,5 +1,5 @@
 from ai_boundary_modules import run_ai_context_manipulation, run_ai_goal_hijacking
-from module_runner import ModuleRunner, default_module_registry
+from module_runner import default_module_registry
 from security_modules import ModuleContext
 
 
@@ -8,8 +8,9 @@ class FakeBrowser:
         self._text = text
         self.opened = []
 
-    def open(self, url):
+    def goto(self, url):
         self.opened.append(url)
+        return url
 
     def fill(self, selector, value):
         self.filled = (selector, value)
@@ -17,13 +18,16 @@ class FakeBrowser:
     def click(self, selector):
         self.clicked = selector
 
+    def text(self):
+        return self._text
+
     def snapshot(self):
         class Snapshot:
             text = self._text
         return Snapshot()
 
-    def links_matching(self, keywords):
-        return ()
+    def run_probe(self, script):
+        return {"exact_elements": 0, "response_html": ""}
 
 
 def context(config_name, config, text):
