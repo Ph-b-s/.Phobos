@@ -1,7 +1,10 @@
+import json
+
 from graph import Graph
 from knowledge_store import KnowledgeStore
 from models import Asset, AssetType
 from scanner import ScanPlan, ModuleSelection, build_planner_context, execute_plan
+from security_modules import module_index
 
 
 class FakeResponse:
@@ -44,8 +47,6 @@ def test_execute_plan_reuses_shared_knowledge_state():
 
 
 def test_planner_context_exposes_only_implemented_modules():
-    context = build_planner_context("https://example.com", KnowledgeStore(), completed_modules=())
-    assert "web.headers" in context
-    assert "web.sqli" in context
-    assert "web.xss" in context
-    assert "web.access_control" not in context
+    context = json.loads(build_planner_context("https://example.com", KnowledgeStore(), completed_modules=()))
+    expected = {item.id for item in module_index().values() if item.active and item.implemented}
+    assert set(context["available_executable_modules"]) == expected
