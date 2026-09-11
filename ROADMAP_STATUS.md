@@ -140,6 +140,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Context-manipulation marker procedure
 - [x] AI tool-surface discovery
 - [x] RAG/retrieval surface discovery
+- [x] Configured RAG authorization and grounding validation
 - [x] Vector/embedding surface discovery
 - [x] Untrusted AI-context source discovery
 - [x] AI resource-control visibility analysis
@@ -152,7 +153,6 @@ This document records the implementation state of the product roadmap on the `fl
 ### Remaining major procedures
 - [ ] Active tool-abuse validation
 - [ ] Active excessive-agency validation
-- [ ] Active RAG authorization/grounding testing
 - [ ] Active vector-store isolation testing
 - [ ] Active AI data-poisoning validation
 - [ ] Resource/cost abuse confirmation
