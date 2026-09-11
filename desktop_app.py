@@ -23,7 +23,6 @@ except ImportError as exc:  # pragma: no cover - exercised only without the opti
 
 from app_services import PhobosServices, create_services, execute_scan
 from config import PHOBOS_VERSION
-from cross_application import discover_related_applications
 from cross_layer import analyze_cross_layer
 from evidence import EvidenceStore
 from graph import Graph
@@ -48,7 +47,6 @@ class DesktopScanSummary:
 
 class ScanWorker(QtCore.QThread):
     """Run one scan outside the Qt event loop."""
-
     progress = QtCore.Signal(int, str)
     result = QtCore.Signal(object)
     failed = QtCore.Signal(str)
@@ -60,120 +58,58 @@ class ScanWorker(QtCore.QThread):
         self.scopes = scopes
         self.browser_enabled = browser
 
-    def run(self) -> None:  # noqa: D401
+    def run(self) -> None:
         services: PhobosServices | None = None
         try:
             self.progress.emit(5, "Preparing scoped application services")
             services = create_services(self.target, self.scopes, browser=self.browser_enabled)
             self.progress.emit(12, "Discovering the application")
-
             output = EvidenceStore(".phobos")
             output.initialize()
             graph = Graph()
-            website = Asset(
-                "website_001",
-                AssetType.WEBSITE,
-                self.target,
-                self.target,
-                metadata={"scopes": list(services.scope.allowed_domains)},
-            )
+            website = Asset("website_001", AssetType.WEBSITE, self.target, self.target,
+                            metadata={"scopes": list(services.scope.allowed_domains)})
             graph.add_node(id=website.id, type=website.type.value, label=website.name, attributes=website.metadata)
-
-            recon = ReconCrawler(
-                services.requests,
-                max_pages=100,
-                max_discovered_urls=5_000,
-                browser=services.browser,
-            ).crawl(self.target, graph=graph)
+            recon = ReconCrawler(services.requests, max_pages=100, max_discovered_urls=5_000,
+                                 browser=services.browser).crawl(self.target, graph=graph)
             self.progress.emit(42, "Building the attack-surface model")
-
             assets = (website, *recon.assets)
-            services.discover_supporting_apps(
-                tuple(asset.url for asset in recon.pages if asset.url),
-                pages=tuple({"url": asset.url, "text": asset.name} for asset in recon.pages[:100]),
-            )
+            services.discover_supporting_apps(tuple(asset.url for asset in recon.pages if asset.url),
+                                              pages=tuple({"url": asset.url, "text": asset.name} for asset in recon.pages[:100]))
             if services.applications:
                 from cross_application import merge_applications_into_graph
                 merge_applications_into_graph(graph, website.id, services.applications)
-
             store = KnowledgeStore()
             store.add_assets(assets)
             for asset in assets:
-                if asset.type in {
-                    AssetType.PAGE,
-                    AssetType.ENDPOINT,
-                    AssetType.API,
-                    AssetType.FORM,
-                    AssetType.INPUT,
-                    AssetType.JAVASCRIPT,
-                }:
-                    store.add_observation(
-                        SecurityObservation(
-                            id=f"recon.web:{asset.id}",
-                            kind=f"recon.web.{asset.type.value}",
-                            source="recon.web",
-                            description=f"Web reconnaissance discovered {asset.type.value}: {asset.name}",
-                            asset_ids=(asset.id,),
-                            data={"url": asset.url},
-                            confidence=asset.confidence,
-                        )
-                    )
+                if asset.type in {AssetType.PAGE, AssetType.ENDPOINT, AssetType.API, AssetType.FORM, AssetType.INPUT, AssetType.JAVASCRIPT}:
+                    store.add_observation(SecurityObservation(
+                        id=f"recon.web:{asset.id}", kind=f"recon.web.{asset.type.value}", source="recon.web",
+                        description=f"Web reconnaissance discovered {asset.type.value}: {asset.name}",
+                        asset_ids=(asset.id,), data={"url": asset.url}, confidence=asset.confidence))
             for asset in recon.ai_surfaces:
-                store.add_observation(
-                    SecurityObservation(
-                        id=f"recon.ai:{asset.id}",
-                        kind="recon.ai_surface",
-                        source="recon.ai",
-                        description=f"Passive reconnaissance identified a likely AI surface: {asset.name}",
-                        asset_ids=(asset.id,),
-                        data={"url": asset.url},
-                        confidence=asset.confidence,
-                    )
-                )
-
+                store.add_observation(SecurityObservation(
+                    id=f"recon.ai:{asset.id}", kind="recon.ai_surface", source="recon.ai",
+                    description=f"Passive reconnaissance identified a likely AI surface: {asset.name}",
+                    asset_ids=(asset.id,), data={"url": asset.url}, confidence=asset.confidence))
             self.progress.emit(55, "Running the module pipeline")
             plan = default_module_selection()
-            scan = execute_scan(
-                services,
-                assets,
-                plan,
-                knowledge=store,
-                graph=graph,
-                metadata={"desktop": True, "browser_enabled": self.browser_enabled},
-            )
-
+            scan = execute_scan(services, assets, plan, knowledge=store, graph=graph,
+                                metadata={"desktop": True, "browser_enabled": self.browser_enabled})
             self.progress.emit(86, "Correlating evidence across the application")
             analysis = analyze_cross_layer(graph, scan.knowledge)
-            output.write_json("desktop_scan.json", {
-                "schema_version": "1.0",
-                "target": self.target,
-                "summary": {
-                    "pages": len(recon.pages),
-                    "endpoints": len(recon.endpoints),
-                    "ai_surfaces": len(recon.ai_surfaces),
-                    "applications": len(services.applications),
-                    "cross_layer_paths": len(analysis.attack_paths),
-                    "modules_completed": len(scan.modules_run),
-                    "findings": len(scan.findings),
-                    "errors": len(scan.errors),
-                },
-            })
+            output.write_json("desktop_scan.json", {"schema_version": "1.0", "target": self.target,
+                "summary": {"pages": len(recon.pages), "endpoints": len(recon.endpoints),
+                "ai_surfaces": len(recon.ai_surfaces), "applications": len(services.applications),
+                "cross_layer_paths": len(analysis.attack_paths), "modules_completed": len(scan.modules_run),
+                "findings": len(scan.findings), "errors": len(scan.errors)}})
             output.write_json("cross_layer.json", analysis.to_dict())
             output.write_json("module_run.json", scan.module_run.to_dict())
             output.write_json("knowledge.json", scan.knowledge.to_dict())
             output.write_json("findings.json", [item.to_dict() for item in scan.findings])
-
-            summary = DesktopScanSummary(
-                self.target,
-                len(recon.pages),
-                len(recon.endpoints),
-                len(recon.ai_surfaces),
-                len(analysis.attack_paths),
-                len(services.applications),
-                len(scan.modules_run),
-                len(scan.findings),
-                len(scan.errors),
-            )
+            summary = DesktopScanSummary(self.target, len(recon.pages), len(recon.endpoints), len(recon.ai_surfaces),
+                                         len(analysis.attack_paths), len(services.applications), len(scan.modules_run),
+                                         len(scan.findings), len(scan.errors))
             self.progress.emit(100, "Scan complete")
             self.result.emit(summary)
             self.finished_cleanly.emit()
@@ -206,14 +142,12 @@ class PhobosWindow(QtWidgets.QMainWindow):
         layout = QtWidgets.QHBoxLayout(root)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-
         sidebar = QtWidgets.QFrame()
         sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(250)
         side = QtWidgets.QVBoxLayout(sidebar)
         side.setContentsMargins(20, 24, 20, 20)
         side.setSpacing(10)
-
         brand = QtWidgets.QLabel("PHOBOS")
         brand.setObjectName("brand")
         version = QtWidgets.QLabel(f"AI SECURITY PLATFORM  ·  {PHOBOS_VERSION}")
@@ -221,24 +155,22 @@ class PhobosWindow(QtWidgets.QMainWindow):
         side.addWidget(brand)
         side.addWidget(version)
         side.addSpacing(22)
-
         self.nav_scan = self._nav_button("New Scan")
         self.nav_scans = self._nav_button("Scans")
+        self.nav_findings = self._nav_button("Findings")
         self.nav_modules = self._nav_button("Modules")
         self.nav_settings = self._nav_button("Settings")
-        for button in (self.nav_scan, self.nav_scans, self.nav_modules, self.nav_settings):
+        for button in (self.nav_scan, self.nav_scans, self.nav_findings, self.nav_modules, self.nav_settings):
             side.addWidget(button)
         side.addStretch(1)
         status = QtWidgets.QLabel("LOCAL ENGINE\nREADY")
         status.setObjectName("engine_status")
         side.addWidget(status)
         layout.addWidget(sidebar)
-
         content = QtWidgets.QFrame()
         content_layout = QtWidgets.QVBoxLayout(content)
         content_layout.setContentsMargins(36, 30, 36, 30)
         content_layout.setSpacing(22)
-
         header = QtWidgets.QHBoxLayout()
         title_box = QtWidgets.QVBoxLayout()
         title = QtWidgets.QLabel("Security workspace")
@@ -250,7 +182,6 @@ class PhobosWindow(QtWidgets.QMainWindow):
         header.addLayout(title_box)
         header.addStretch(1)
         content_layout.addLayout(header)
-
         target_card = QtWidgets.QFrame()
         target_card.setObjectName("card")
         form = QtWidgets.QGridLayout(target_card)
@@ -276,22 +207,14 @@ class PhobosWindow(QtWidgets.QMainWindow):
         form.addWidget(self.scope_input, 1, 1)
         form.addWidget(self.scan_button, 1, 2)
         content_layout.addWidget(target_card)
-
         self.progress = QtWidgets.QProgressBar()
         self.progress.setRange(0, 100)
         self.progress.setValue(0)
         self.progress.setTextVisible(False)
         content_layout.addWidget(self.progress)
-
         stats = QtWidgets.QHBoxLayout()
         self.stat_cards = {}
-        for key, label in (
-            ("pages", "Pages"),
-            ("endpoints", "Endpoints"),
-            ("ai", "AI surfaces"),
-            ("paths", "Attack paths"),
-            ("findings", "Findings"),
-        ):
+        for key, label in (("pages", "Pages"), ("endpoints", "Endpoints"), ("ai", "AI surfaces"), ("paths", "Attack paths"), ("findings", "Findings")):
             card = QtWidgets.QFrame()
             card.setObjectName("metric")
             box = QtWidgets.QVBoxLayout(card)
@@ -304,40 +227,25 @@ class PhobosWindow(QtWidgets.QMainWindow):
             stats.addWidget(card)
             self.stat_cards[key] = number
         content_layout.addLayout(stats)
-
         lower = QtWidgets.QHBoxLayout()
         self.activity = QtWidgets.QPlainTextEdit()
         self.activity.setReadOnly(True)
         self.activity.setPlaceholderText("Phobos activity will appear here during scans.")
         self.activity.setObjectName("activity")
         lower.addWidget(self.activity, 2)
-
         side_info = QtWidgets.QFrame()
         side_info.setObjectName("card")
         info_layout = QtWidgets.QVBoxLayout(side_info)
         info_layout.setContentsMargins(20, 20, 20, 20)
         info_title = QtWidgets.QLabel("Architecture")
         info_title.setObjectName("card_title")
-        architecture = QtWidgets.QLabel(
-            "WEB TARGET\n"
-            "↓\n"
-            "ATTACK-SURFACE GRAPH\n"
-            "↓\n"
-            "AI SECURITY BRAIN\n"
-            "↓\n"
-            "MODULE RUNNER\n"
-            "↓\n"
-            "EVIDENCE + CORRELATION\n"
-            "↓\n"
-            "NEXT TEST"
-        )
+        architecture = QtWidgets.QLabel("WEB TARGET\n↓\nATTACK-SURFACE GRAPH\n↓\nAI SECURITY BRAIN\n↓\nMODULE RUNNER\n↓\nEVIDENCE + CORRELATION\n↓\nNEXT TEST")
         architecture.setObjectName("architecture")
         architecture.setAlignment(QtCore.Qt.AlignmentFlag.AlignCenter)
         info_layout.addWidget(info_title)
         info_layout.addWidget(architecture, 1)
         lower.addWidget(side_info, 1)
         content_layout.addLayout(lower, 1)
-
         self.statusBar().showMessage("Ready")
         layout.addWidget(content, 1)
 
@@ -349,8 +257,7 @@ class PhobosWindow(QtWidgets.QMainWindow):
         return button
 
     def _apply_theme(self) -> None:
-        self.setStyleSheet(
-            """
+        self.setStyleSheet("""
             QMainWindow, QWidget { background: #0d1014; color: #e8edf2; font-family: Segoe UI, Arial; }
             #sidebar { background: #090b0e; border-right: 1px solid #20262d; }
             #brand { font-size: 28px; font-weight: 800; letter-spacing: 3px; }
@@ -373,8 +280,7 @@ class PhobosWindow(QtWidgets.QMainWindow):
             QProgressBar::chunk { background: #dbe2e8; border-radius: 5px; }
             #activity { background: #0b0e12; border: 1px solid #232b33; border-radius: 12px; padding: 12px; color: #b7c0c9; font-family: Consolas, monospace; }
             QStatusBar { background: #090b0e; color: #7f8a96; }
-            """
-        )
+        """)
 
     @QtCore.Slot()
     def start_scan(self) -> None:
@@ -394,7 +300,6 @@ class PhobosWindow(QtWidgets.QMainWindow):
             return
         if self.worker is not None and self.worker.isRunning():
             return
-
         self.activity.clear()
         self.progress.setValue(0)
         self.scan_button.setEnabled(False)
@@ -421,10 +326,7 @@ class PhobosWindow(QtWidgets.QMainWindow):
         self.stat_cards["ai"].setText(str(summary.ai_surfaces))
         self.stat_cards["paths"].setText(str(summary.cross_layer_paths))
         self.stat_cards["findings"].setText(str(summary.findings))
-        self.activity.appendPlainText(
-            f"[result] {summary.modules_completed} modules completed · "
-            f"{summary.findings} findings · {summary.applications} supporting apps"
-        )
+        self.activity.appendPlainText(f"[result] {summary.modules_completed} modules completed · {summary.findings} findings · {summary.applications} supporting apps")
 
     @QtCore.Slot(str)
     def _scan_failed(self, message: str) -> None:
