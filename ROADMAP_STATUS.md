@@ -79,6 +79,8 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Desktop application shell on shared application services
 - [x] Automated test suite and CI definition
 
-## Current implementation boundary
+## Important implementation boundary
 
-Phobos deliberately does not mark every vulnerability name in `security_modules.py` as implemented merely because it appears in the catalog. A module is considered implemented only when it has a registered execution handler and deterministic evidence logic. This keeps the product honest while advanced vulnerability procedures are added incrementally.
+The roadmap architecture is implemented, but the vulnerability catalog remains intentionally broader than the set of executable procedures. A vulnerability module is marked `implemented=True` only when it has a registered handler and deterministic evidence logic. Advanced modules such as SQL injection, XSS, access-control testing, SSRF, tool abuse, RAG security, and similar procedures therefore remain explicit implementation backlog items rather than being represented as finished capabilities.
+
+This distinction is intentional: a module name in the catalog is a planned security capability; a registered module with tests and evidence logic is a shipped capability.
