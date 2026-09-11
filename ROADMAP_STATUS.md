@@ -103,13 +103,18 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Bounded path-traversal marker checks
 - [x] Passive file-upload validation analysis
 - [x] WebSocket endpoint discovery without active message exchange
+- [x] SSRF sink discovery
+- [x] Command-execution sink discovery
+- [x] XML-processing surface discovery
+- [x] Serialization/deserialization surface discovery
+- [x] Business-logic workflow candidate discovery
 
 ### Remaining major procedures
 
-- [ ] SSRF
-- [ ] Command injection
-- [ ] XXE
-- [ ] Unsafe deserialization
+- [ ] Active SSRF validation
+- [ ] Active command-injection validation
+- [ ] Active XXE validation
+- [ ] Active unsafe-deserialization validation
 - [ ] Cache poisoning/deception confirmation
 - [ ] HTTP request smuggling
 - [ ] JWT signing/claim validation beyond passive analysis
@@ -130,16 +135,22 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] AI output-handling render probe
 - [x] Goal-hijacking marker procedure
 - [x] Context-manipulation marker procedure
+- [x] AI tool-surface discovery
+- [x] RAG/retrieval surface discovery
+- [x] Vector/embedding surface discovery
+- [x] Untrusted AI-context source discovery
+- [x] AI resource-control visibility analysis
+- [x] Multi-agent surface discovery
 
 ### Remaining major procedures
 
-- [ ] Tool-abuse testing
-- [ ] Excessive-agency testing
-- [ ] RAG security testing
-- [ ] Vector/embedding security testing
-- [ ] AI data poisoning
-- [ ] Resource/cost abuse testing
-- [ ] Multi-agent trust-boundary testing
+- [ ] Active tool-abuse validation
+- [ ] Active excessive-agency validation
+- [ ] Active RAG authorization/grounding testing
+- [ ] Active vector-store isolation testing
+- [ ] Active AI data-poisoning validation
+- [ ] Resource/cost abuse confirmation
+- [ ] Active multi-agent trust-boundary testing
 - [ ] Full sensitive-information disclosure testing beyond configured markers
 
 ## Productization
@@ -155,6 +166,4 @@ This document records the implementation state of the product roadmap on the `fl
 
 ## Important implementation boundary
 
-The vulnerability catalog remains intentionally broader than the executable procedure set. A module is marked `implemented=True` only when it has a registered handler, deterministic evidence logic, and regression coverage. Riskier classes remain explicitly unimplemented until they have a bounded execution contract and appropriate authorization/configuration gates.
-
-This distinction is intentional: a module name in the catalog is a planned security capability; a registered, tested module with evidence logic is a shipped capability.
+The vulnerability catalog intentionally distinguishes **surface identification** from **active vulnerability confirmation**. Passive modules may identify a high-value sink and create a bounded follow-up signal without claiming exploitation. A module is marked `implemented=True` only when it has a registered handler, deterministic evidence logic, and regression coverage.
