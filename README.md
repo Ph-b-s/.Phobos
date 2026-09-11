@@ -102,9 +102,9 @@ Each module receives the same shared knowledge state and can emit:
 - findings
 - bounded follow-up candidates
 
-The runner rejects unknown modules, inactive modules, invalid stage ordering, oversized runs, and malformed module output. The AI can only select module IDs that exist in the catalog; actual execution requires a registered implementation.
+The runner rejects unknown modules, inactive modules, invalid stage ordering, oversized runs, and malformed module output. The AI can only select module IDs that exist in the catalog and are eligible for the current configured capabilities; actual execution requires a registered implementation.
 
-The current built-in implementations are the deterministic cross-layer correlation modules. Web and AI vulnerability procedures are added to the same runner as they become real.
+Implemented procedures currently include Web hardening/visibility checks, non-destructive XSS and SQLi signals, CSRF analysis, client-side JavaScript analysis, JWT/GraphQL checks, SSTI arithmetic probes, Host-header/cache signals, configured authentication/authorization workflows, and controlled direct/indirect AI prompt-injection procedures.
 
 ---
 
@@ -244,6 +244,23 @@ The AI may not change the target, bypass scope, execute arbitrary shell commands
 
 ---
 
+# Configuration-dependent testing
+
+Higher-impact workflows are explicitly opt-in and configuration driven. Examples include authenticated-session bootstrap, low/high-privilege authorization comparison, direct prompt-injection canaries, and protected system-prompt marker tests.
+
+```bash
+phobos scan https://example.com \
+  --scope example.com \
+  --auth-config auth.json \
+  --access-control-config access.json \
+  --prompt-injection-config ai.json \
+  --system-prompt-config system-prompt.json
+```
+
+These procedures do not invent credentials, selectors, object identifiers, or privileged assumptions. Sensitive values are redacted from evidence wherever possible.
+
+---
+
 # Development status
 
 ### Foundation
@@ -266,15 +283,72 @@ The AI may not change the target, bypass scope, execute arbitrary shell commands
 - [x] AI planning layer
 - [x] Optional Nmap Web module
 
-### Current implementation target
+### Implemented security procedures
 
-- [ ] Connect real Web vulnerability procedures to the runner
-- [ ] Connect real AI vulnerability procedures to the runner
-- [ ] Implement the first full PortSwigger vulnerability procedure
-- [ ] Improve request / response observations
-- [ ] Build authenticated-session handling
-- [ ] Implement AI-guided iterative module selection
-- [ ] Add confirmation/validation stages for high-value findings
-- [ ] Produce reproducible findings and reports
-- [ ] Build the Desktop App around the same engine
+- [x] Security headers
+- [x] Cookie security
+- [x] Common exposure
+- [x] HTTP methods
+- [x] Configuration disclosure
+- [x] CORS
+- [x] Information-disclosure pattern detection
+- [x] API baseline
+- [x] Reflected XSS signal detection
+- [x] SQL injection error/differential signals
+- [x] CSRF form analysis
+- [x] Client-side JavaScript source/sink analysis
+- [x] JWT algorithm signal analysis
+- [x] GraphQL introspection analysis
+- [x] Low-impact SSTI arithmetic probes
+- [x] Host-header trust signals
+- [x] Cache-policy/reflection signals
+- [x] Configured authentication workflow
+- [x] Configured low/high-privilege authorization comparison
+- [x] Direct prompt-injection canary
+- [x] Indirect prompt-injection procedure
+- [x] Protected system-prompt marker test
 
+### Next major vulnerability procedures
+
+- [ ] NoSQL injection
+- [ ] SSRF
+- [ ] Command injection
+- [ ] Path traversal
+- [ ] File-upload security
+- [ ] XXE
+- [ ] Unsafe deserialization
+- [ ] Full cache poisoning/deception confirmation
+- [ ] HTTP request smuggling
+- [ ] Full JWT signing/claim validation
+- [ ] GraphQL authorization/query abuse
+- [ ] WebSocket security
+- [ ] Race-condition testing
+- [ ] Business-logic workflow abuse
+- [ ] Full IDOR/object-level authorization testing
+- [ ] AI sensitive-data disclosure
+- [ ] AI output handling
+- [ ] AI tool abuse
+- [ ] Excessive agency
+- [ ] RAG/vector security
+- [ ] AI data poisoning
+- [ ] Resource/cost abuse
+- [ ] Multi-agent security
+- [ ] Goal hijacking
+- [ ] Memory/context manipulation
+
+### Productization
+
+- [x] Human-readable Markdown report
+- [x] Deterministic scan summarizer
+- [x] Iterative AI planner with hard iteration cap
+- [x] Configuration-aware AI module eligibility
+- [x] Optional Nmap module
+- [x] Desktop application shell on shared application services
+- [x] Automated test suite and CI definition
+- [x] Evidence privacy safeguards for secrets and tokens
+
+---
+
+## Current principle
+
+Phobos is developed as a controlled security-testing platform, not an unrestricted autonomous exploit framework. New vulnerability procedures are only marked implemented once they have a bounded execution contract, deterministic evidence logic, appropriate authorization/configuration gates where necessary, and regression coverage.
