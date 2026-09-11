@@ -49,6 +49,7 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--no-default-modules", action="store_true")
     scan.add_argument("--ai", action="store_true", help="enable iterative local-Mistral planning")
     scan.add_argument("--max-iterations", type=int, default=3)
+    scan.add_argument("--auth-config", metavar="PATH", help="JSON workflow for an authorized authenticated-session bootstrap")
     scan.add_argument("--indirect-config", metavar="PATH", help="JSON config for the controlled indirect-injection procedure")
     scan.add_argument("--allow-state-change", action="store_true", help="allow explicitly configured state-changing validation")
     scan.add_argument("--confirm-high-risk", action="store_true", help="second human-approval gate for state-changing validation")
@@ -72,12 +73,26 @@ def _target_url(target: str) -> str:
     return value if "://" in value else f"https://{value}"
 
 
-def _load_indirect_config(path: str | None) -> dict[str, object] | None:
+def _load_json_object(path: str | None, *, option_name: str) -> dict[str, object] | None:
     if not path:
         return None
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     if not isinstance(payload, dict):
-        raise ValueError("indirect-config must contain a JSON object")
+        raise ValueError(f"{option_name} must contain a JSON object")
+    return payload
+
+
+def _load_indirect_config(path: str | None) -> dict[str, object] | None:
+    return _load_json_object(path, option_name="indirect-config")
+
+
+def _load_auth_config(path: str | None) -> dict[str, object] | None:
+    payload = _load_json_object(path, option_name="auth-config")
+    if payload is None:
+        return None
+    steps = payload.get("steps")
+    if not isinstance(steps, list) or not steps:
+        raise ValueError("auth-config must contain a non-empty 'steps' list")
     return payload
 
 
@@ -168,6 +183,7 @@ def run_scan(args: argparse.Namespace) -> int:
     website = Asset("website_001", AssetType.WEBSITE, config.target, config.target, metadata={"scopes": list(scope.allowed_domains)})
     graph.add_node(id=website.id, type=website.type.value, label=website.name, attributes=website.metadata)
     browser: PlaywrightBrowserSession | None = None
+    auth_config = _load_auth_config(args.auth_config)
     indirect_config = _load_indirect_config(args.indirect_config)
     allow_state_change = bool(args.allow_state_change and args.confirm_high_risk)
     if args.allow_state_change and not args.confirm_high_risk:
@@ -177,11 +193,13 @@ def run_scan(args: argparse.Namespace) -> int:
     print(f"  Target: {config.target}")
     print(f"  Scope:  {', '.join(scope.allowed_domains)}")
     print(f"  Web runtime: {'browser/JavaScript' if args.browser else 'static HTTP'}")
+    if args.auth_config:
+        print("  Authentication: configured workflow")
     if args.ai:
         print(f"  AI planning: enabled ({args.max_iterations} iterations max)")
 
     try:
-        if args.browser:
+        if args.browser or auth_config is not None:
             browser = PlaywrightBrowserSession(scope, limits=BrowserLimits(
                 max_requests=args.browser_max_requests, navigation_timeout_ms=int(config.timeout * 1000)),
                 browser_name=args.browser_name, user_agent=config.user_agent)
@@ -204,6 +222,7 @@ def run_scan(args: argparse.Namespace) -> int:
             "workflow": register_standard_actions(WorkflowEngine()),
             "applications": related,
             "metadata": {"scope": scope, "request_manager": manager,
+                         "auth_workflow": auth_config or {},
                          "indirect_prompt_injection": indirect_config or {}, "allow_state_change": allow_state_change},
         }
         eligible_ai_modules = {item.id for item in module_index().values() if item.active and item.implemented}
@@ -211,6 +230,8 @@ def run_scan(args: argparse.Namespace) -> int:
             eligible_ai_modules.discard("web.nmap")
         if indirect_config is None:
             eligible_ai_modules.discard("ai.indirect_prompt_injection")
+        if auth_config is None:
+            eligible_ai_modules.discard("web.auth")
 
         plan = _initial_plan(args, indirect_config)
         completed: set[str] = set()
