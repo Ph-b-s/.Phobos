@@ -89,7 +89,7 @@ MODULE_CATALOG: tuple[ModuleSpec, ...] = (
     ModuleSpec("web.path_traversal", "Path traversal", "Test file/path parameters for traversal outside intended directories.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.file_upload", "File upload", "Test upload validation, processing, storage, and execution boundaries.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.xxe", "XXE", "Test XML processing for external-entity injection conditions.", ModuleDomain.WEB, active=True),
-    ModuleSpec("web.ssti", "Server-side template injection", "Test template expression surfaces for server-side evaluation.", ModuleDomain.WEB, active=True),
+    ModuleSpec("web.ssti", "Server-side template injection", "Test arithmetic-only template expressions for server-side evaluation signals.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.deserialization", "Deserialization", "Test serialized-object inputs for unsafe deserialization.", ModuleDomain.WEB, active=True),
     ModuleSpec("web.cors", "CORS", "Test cross-origin policy and credential exposure.", ModuleDomain.WEB, active=True, implemented=True),
     ModuleSpec("web.cache", "Web cache attacks", "Test cache poisoning, deception, and keying behavior.", ModuleDomain.WEB, active=True),
