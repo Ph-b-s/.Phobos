@@ -22,3 +22,11 @@ def test_desktop_quick_start_script_exists():
     text = script.read_text(encoding="utf-8")
     assert "playwright install chromium" in text
     assert "desktop_launcher" in text
+
+
+def test_desktop_launcher_exposes_findings_navigation():
+    text = Path("desktop_launcher.py").read_text(encoding="utf-8")
+    assert "nav_findings" in text
+    assert "def show_findings" in text
+    assert 'Path(".phobos") / "findings.json"' in text
+    assert "QListWidget" in text
