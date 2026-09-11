@@ -95,6 +95,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] JWT-like token analysis with token redaction
 - [x] GraphQL introspection analysis
 - [x] GraphQL authorization-sensitive surface discovery
+- [x] Configured read-only GraphQL low/high-privilege authorization comparison
 - [x] Low-impact SSTI arithmetic probes
 - [x] Host-header trust signal analysis
 - [x] Cache-policy / untrusted-reflection analysis
@@ -119,7 +120,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] Cache poisoning/deception confirmation
 - [ ] HTTP request smuggling confirmation
 - [ ] JWT signing/claim validation beyond passive analysis
-- [ ] GraphQL authorization/query abuse testing beyond the new surface mapping
+- [ ] Broader GraphQL query authorization/abuse testing beyond configured read-only role comparison
 - [ ] Active WebSocket authentication/authorization/message testing
 - [ ] Race-condition testing
 - [ ] Business-logic workflow abuse
