@@ -21,14 +21,12 @@ class ModuleResult:
     observations: tuple[SecurityObservation, ...] = ()
     findings: tuple[Finding, ...] = ()
     follow_ups: tuple[dict[str, Any], ...] = ()
-
     def __post_init__(self) -> None:
         if len(self.observations) + len(self.findings) > MAX_RESULT_ITEMS_PER_MODULE:
             raise ValueError("module result exceeds item limit")
         object.__setattr__(self, "observations", tuple(self.observations))
         object.__setattr__(self, "findings", tuple(self.findings))
         object.__setattr__(self, "follow_ups", tuple(dict(item) for item in self.follow_ups))
-
 
 @dataclass(frozen=True, slots=True)
 class ModuleExecution:
@@ -39,7 +37,6 @@ class ModuleExecution:
     follow_ups_added: int = 0
     error: str | None = None
 
-
 @dataclass(frozen=True, slots=True)
 class ModuleRun:
     executions: tuple[ModuleExecution, ...]
@@ -48,71 +45,41 @@ class ModuleRun:
     follow_ups: tuple[dict[str, Any], ...]
     knowledge: KnowledgeStore
     errors: tuple[str, ...] = ()
-
     def to_dict(self) -> dict[str, Any]:
-        return {
-            "executions": [{"module_id": item.module_id, "status": item.status,
-                            "observations_added": item.observations_added,
-                            "findings_added": item.findings_added,
-                            "follow_ups_added": item.follow_ups_added,
-                            "error": item.error} for item in self.executions],
-            "findings": [item.to_dict() for item in self.findings],
-            "observations": [item.to_dict() for item in self.observations],
-            "follow_ups": list(self.follow_ups),
-            "errors": list(self.errors),
-        }
-
+        return {"executions": [{"module_id": item.module_id, "status": item.status, "observations_added": item.observations_added, "findings_added": item.findings_added, "follow_ups_added": item.follow_ups_added, "error": item.error} for item in self.executions], "findings": [item.to_dict() for item in self.findings], "observations": [item.to_dict() for item in self.observations], "follow_ups": list(self.follow_ups), "errors": list(self.errors)}
 
 ModuleFactory = Callable[[ModuleSpec], SecurityModule]
 ModuleHandler = Callable[[ModuleContext], ModuleResult | Iterable[SecurityObservation | Finding]]
 
-
 class ModuleRegistry:
-    """Explicit registry of executable module implementations."""
-
     def __init__(self) -> None:
         self._handlers: dict[str, ModuleHandler] = {}
-
     def register(self, module_id: str, handler: ModuleHandler) -> None:
         module_id = module_id.strip()
-        if module_id not in module_index():
-            raise ValueError(f"cannot register unknown security module: {module_id}")
-        if not callable(handler):
-            raise TypeError("module handler must be callable")
-        if module_id in self._handlers:
-            raise ValueError(f"security module already registered: {module_id}")
+        if module_id not in module_index(): raise ValueError(f"cannot register unknown security module: {module_id}")
+        if not callable(handler): raise TypeError("module handler must be callable")
+        if module_id in self._handlers: raise ValueError(f"security module already registered: {module_id}")
         self._handlers[module_id] = handler
-
     def replace(self, module_id: str, handler: ModuleHandler) -> None:
         module_id = module_id.strip()
-        if module_id not in module_index():
-            raise ValueError(f"cannot register unknown security module: {module_id}")
-        if not callable(handler):
-            raise TypeError("module handler must be callable")
+        if module_id not in module_index(): raise ValueError(f"cannot register unknown security module: {module_id}")
+        if not callable(handler): raise TypeError("module handler must be callable")
         self._handlers[module_id] = handler
-
-    def get(self, module_id: str) -> ModuleHandler | None:
-        return self._handlers.get(module_id)
-
-    def ids(self) -> frozenset[str]:
-        return frozenset(self._handlers)
+    def get(self, module_id: str) -> ModuleHandler | None: return self._handlers.get(module_id)
+    def ids(self) -> frozenset[str]: return frozenset(self._handlers)
 
 
 def default_module_registry() -> ModuleRegistry:
     registry = ModuleRegistry()
-    for module_id in (
-        "cross_layer.web_to_ai", "cross_layer.ai_to_web", "cross_layer.auth_boundary",
-        "cross_layer.data_flow", "cross_layer.control_flow", "cross_layer.capability_escalation",
-        "cross_layer.attack_path",
-    ):
+    for module_id in ("cross_layer.web_to_ai", "cross_layer.ai_to_web", "cross_layer.auth_boundary", "cross_layer.data_flow", "cross_layer.control_flow", "cross_layer.capability_escalation", "cross_layer.attack_path"):
         registry.register(module_id, _cross_layer_handler)
-
     from module_adapters import run_indirect_prompt_injection_module, run_nmap_module
     from standard_modules import run_web_config, run_web_cookies, run_web_cors, run_web_exposure, run_web_headers, run_web_methods
     from advanced_web_modules import run_web_api, run_web_info_disclosure, run_web_sqli, run_web_xss
     from auth_module import run_web_auth
     from csrf_module import run_web_csrf
     from access_control_module import run_web_access_control
+    from authorization_protocol_modules import run_web_object_authorization, run_web_graphql_auth_surface, run_web_websocket_auth_surface, run_ai_tool_rag_bridge
     from web_analysis_modules import run_web_client_javascript, run_web_graphql, run_web_jwt
     from template_module import run_web_ssti
     from protocol_modules import run_web_cache, run_web_host_header, run_web_request_smuggling
@@ -121,40 +88,13 @@ def default_module_registry() -> ModuleRegistry:
     from ai_security_modules import run_ai_prompt_injection, run_ai_system_prompt
     from ai_data_module import run_ai_data_disclosure
     from ai_boundary_modules import run_ai_output_handling, run_ai_goal_hijacking, run_ai_context_manipulation
-    from surface_analysis_modules import (
-        run_web_ssrf, run_web_command_injection, run_web_xxe, run_web_deserialization, run_web_business_logic,
-        run_ai_tool_abuse, run_ai_rag, run_ai_vector, run_ai_data_poisoning, run_ai_unbounded_consumption, run_ai_multi_agent,
-    )
-    from integration_modules import (
-        run_web_openapi, run_web_open_redirect, run_web_source_maps, run_web_sensitive_inputs,
-        run_ai_memory, run_ai_identity, run_ai_trust_boundary,
-    )
-
+    from surface_analysis_modules import run_web_ssrf, run_web_command_injection, run_web_xxe, run_web_deserialization, run_web_business_logic, run_ai_tool_abuse, run_ai_rag, run_ai_vector, run_ai_data_poisoning, run_ai_unbounded_consumption, run_ai_multi_agent
+    from integration_modules import run_web_openapi, run_web_open_redirect, run_web_source_maps, run_web_sensitive_inputs, run_ai_memory, run_ai_identity, run_ai_trust_boundary
     handlers = {
-        "web.headers": run_web_headers, "web.cookies": run_web_cookies, "web.exposure": run_web_exposure,
-        "web.methods": run_web_methods, "web.config": run_web_config, "web.cors": run_web_cors,
-        "web.info_disclosure": run_web_info_disclosure, "web.api": run_web_api, "web.xss": run_web_xss,
-        "web.sqli": run_web_sqli, "web.nosqli": run_web_nosql, "web.auth": run_web_auth, "web.csrf": run_web_csrf,
-        "web.access_control": run_web_access_control, "web.client_javascript": run_web_client_javascript,
-        "web.jwt": run_web_jwt, "web.graphql": run_web_graphql, "web.ssti": run_web_ssti,
-        "web.cache": run_web_cache, "web.host_header": run_web_host_header, "web.request_smuggling": run_web_request_smuggling,
-        "web.path_traversal": run_web_path_traversal, "web.file_upload": run_web_file_upload, "web.websocket": run_web_websocket,
-        "web.ssrf": run_web_ssrf, "web.command_injection": run_web_command_injection, "web.xxe": run_web_xxe,
-        "web.deserialization": run_web_deserialization, "web.business_logic": run_web_business_logic, "web.nmap": run_nmap_module,
-        "web.openapi": run_web_openapi, "web.open_redirect": run_web_open_redirect, "web.source_maps": run_web_source_maps,
-        "web.sensitive_inputs": run_web_sensitive_inputs,
-        "ai.prompt_injection": run_ai_prompt_injection, "ai.indirect_prompt_injection": run_indirect_prompt_injection_module,
-        "ai.system_prompt": run_ai_system_prompt, "ai.data_disclosure": run_ai_data_disclosure,
-        "ai.output_handling": run_ai_output_handling, "ai.goal_hijacking": run_ai_goal_hijacking,
-        "ai.context_manipulation": run_ai_context_manipulation, "ai.tool_abuse": run_ai_tool_abuse,
-        "ai.rag": run_ai_rag, "ai.vector": run_ai_vector, "ai.data_poisoning": run_ai_data_poisoning,
-        "ai.unbounded_consumption": run_ai_unbounded_consumption, "ai.multi_agent": run_ai_multi_agent,
-        "ai.memory": run_ai_memory, "ai.identity": run_ai_identity, "ai.trust_boundary": run_ai_trust_boundary,
+        "web.headers": run_web_headers, "web.cookies": run_web_cookies, "web.exposure": run_web_exposure, "web.methods": run_web_methods, "web.config": run_web_config, "web.cors": run_web_cors, "web.info_disclosure": run_web_info_disclosure, "web.api": run_web_api, "web.xss": run_web_xss, "web.sqli": run_web_sqli, "web.nosqli": run_web_nosql, "web.auth": run_web_auth, "web.csrf": run_web_csrf, "web.access_control": run_web_access_control, "web.object_authorization": run_web_object_authorization, "web.client_javascript": run_web_client_javascript, "web.jwt": run_web_jwt, "web.graphql": run_web_graphql, "web.graphql_auth_surface": run_web_graphql_auth_surface, "web.ssti": run_web_ssti, "web.cache": run_web_cache, "web.host_header": run_web_host_header, "web.request_smuggling": run_web_request_smuggling, "web.path_traversal": run_web_path_traversal, "web.file_upload": run_web_file_upload, "web.websocket": run_web_websocket, "web.websocket_auth_surface": run_web_websocket_auth_surface, "web.ssrf": run_web_ssrf, "web.command_injection": run_web_command_injection, "web.xxe": run_web_xxe, "web.deserialization": run_web_deserialization, "web.business_logic": run_web_business_logic, "web.nmap": run_nmap_module, "web.openapi": run_web_openapi, "web.open_redirect": run_web_open_redirect, "web.source_maps": run_web_source_maps, "web.sensitive_inputs": run_web_sensitive_inputs, "ai.prompt_injection": run_ai_prompt_injection, "ai.indirect_prompt_injection": run_indirect_prompt_injection_module, "ai.system_prompt": run_ai_system_prompt, "ai.data_disclosure": run_ai_data_disclosure, "ai.output_handling": run_ai_output_handling, "ai.goal_hijacking": run_ai_goal_hijacking, "ai.context_manipulation": run_ai_context_manipulation, "ai.tool_abuse": run_ai_tool_abuse, "ai.rag": run_ai_rag, "ai.vector": run_ai_vector, "ai.data_poisoning": run_ai_data_poisoning, "ai.unbounded_consumption": run_ai_unbounded_consumption, "ai.multi_agent": run_ai_multi_agent, "ai.memory": run_ai_memory, "ai.identity": run_ai_identity, "ai.trust_boundary": run_ai_trust_boundary, "ai.tool_rag_bridge": run_ai_tool_rag_bridge,
     }
-    for module_id, handler in handlers.items():
-        registry.register(module_id, handler)
+    for module_id, handler in handlers.items(): registry.register(module_id, handler)
     return registry
-
 
 @dataclass(frozen=True, slots=True)
 class ModuleRunner:
@@ -162,129 +102,65 @@ class ModuleRunner:
     max_modules: int = MAX_MODULES_PER_RUN
     max_follow_ups: int = MAX_FOLLOW_UPS_PER_RUN
     stop_on_error: bool = False
-
     def __post_init__(self) -> None:
-        if not 1 <= self.max_modules <= MAX_MODULES_PER_RUN:
-            raise ValueError(f"max_modules must be between 1 and {MAX_MODULES_PER_RUN}")
-        if not 1 <= self.max_follow_ups <= MAX_FOLLOW_UPS_PER_RUN:
-            raise ValueError(f"max_follow_ups must be between 1 and {MAX_FOLLOW_UPS_PER_RUN}")
-
-    def run(self, target: str, module_ids: Iterable[str], *, knowledge: KnowledgeStore | None = None,
-            graph: Graph | None = None, context_metadata: Mapping[str, Any] | None = None,
-            assets: tuple[Any, ...] = (), capabilities: Mapping[str, Any] | None = None) -> ModuleRun:
+        if not 1 <= self.max_modules <= MAX_MODULES_PER_RUN: raise ValueError(f"max_modules must be between 1 and {MAX_MODULES_PER_RUN}")
+        if not 1 <= self.max_follow_ups <= MAX_FOLLOW_UPS_PER_RUN: raise ValueError(f"max_follow_ups must be between 1 and {MAX_FOLLOW_UPS_PER_RUN}")
+    def run(self, target: str, module_ids: Iterable[str], *, knowledge: KnowledgeStore | None = None, graph: Graph | None = None, context_metadata: Mapping[str, Any] | None = None, assets: tuple[Any, ...] = (), capabilities: Mapping[str, Any] | None = None) -> ModuleRun:
         store = knowledge or KnowledgeStore()
-        if assets:
-            store.add_assets(assets)
+        if assets: store.add_assets(assets)
         ids = tuple(dict.fromkeys(item.strip() for item in module_ids if item and item.strip()))
-        if len(ids) > self.max_modules:
-            raise ValueError(f"module run exceeds limit of {self.max_modules} modules")
+        if len(ids) > self.max_modules: raise ValueError(f"module run exceeds limit of {self.max_modules} modules")
         _validate_stage_order(ids)
-        catalog = module_index()
-        executions: list[ModuleExecution] = []
-        errors: list[str] = []
-        all_follow_ups: list[dict[str, Any]] = []
-        caps = dict(capabilities or {})
-
+        catalog = module_index(); executions=[]; errors=[]; all_follow_ups=[]; caps=dict(capabilities or {})
         for module_id in ids:
             spec = catalog.get(module_id)
             if spec is None:
-                message = f"unknown security module: {module_id}"
-                executions.append(ModuleExecution(module_id, "invalid", error=message))
-                errors.append(message)
-                if self.stop_on_error:
-                    break
+                message=f"unknown security module: {module_id}"; executions.append(ModuleExecution(module_id,"invalid",error=message)); errors.append(message)
+                if self.stop_on_error: break
                 continue
-            if not spec.active:
-                executions.append(ModuleExecution(module_id, "inactive"))
-                continue
-            handler = self.registry.get(module_id)
-            if handler is None:
-                executions.append(ModuleExecution(module_id, "unimplemented"))
-                continue
-
-            context = ModuleContext(
-                target=target, assets=tuple(store.assets), knowledge=store, graph=graph,
-                browser=caps.get("browser"), interactor=caps.get("interactor"), accounts=caps.get("accounts"),
-                workflow=caps.get("workflow"), applications=tuple(caps.get("applications", ())),
-                metadata={**dict(context_metadata or {}), **dict(caps.get("metadata", {})), "module_id": module_id,
-                          "module_domain": spec.domain.value, "module_stage": spec.stage.value},
-            )
+            if not spec.active: executions.append(ModuleExecution(module_id,"inactive")); continue
+            handler=self.registry.get(module_id)
+            if handler is None: executions.append(ModuleExecution(module_id,"unimplemented")); continue
+            context=ModuleContext(target=target, assets=tuple(store.assets), knowledge=store, graph=graph, browser=caps.get("browser"), interactor=caps.get("interactor"), accounts=caps.get("accounts"), workflow=caps.get("workflow"), applications=tuple(caps.get("applications", ())), metadata={**dict(context_metadata or {}), **dict(caps.get("metadata", {})), "module_id":module_id, "module_domain":spec.domain.value, "module_stage":spec.stage.value})
             try:
-                before_observations = {item.id for item in store.observations}
-                before_findings = {item.id for item in store.findings}
-                result = _normalize_result(handler(context), module_id)
-                for observation in result.observations:
-                    store.add_observation(observation)
-                for finding in result.findings:
-                    store.add_finding(finding)
-                available = self.max_follow_ups - len(all_follow_ups)
-                if len(result.follow_ups) > available:
-                    raise RuntimeError("module follow-up limit exceeded")
+                before_observations={item.id for item in store.observations}; before_findings={item.id for item in store.findings}
+                result=_normalize_result(handler(context),module_id)
+                for observation in result.observations: store.add_observation(observation)
+                for finding in result.findings: store.add_finding(finding)
+                available=self.max_follow_ups-len(all_follow_ups)
+                if len(result.follow_ups)>available: raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
-                executions.append(ModuleExecution(
-                    module_id, "completed",
-                    sum(item.id not in before_observations for item in result.observations),
-                    sum(item.id not in before_findings for item in result.findings),
-                    len(result.follow_ups),
-                ))
+                executions.append(ModuleExecution(module_id,"completed",sum(item.id not in before_observations for item in result.observations),sum(item.id not in before_findings for item in result.findings),len(result.follow_ups)))
             except Exception as exc:
-                message = f"{module_id}: {type(exc).__name__}: {exc}"
-                if len(errors) < MAX_ERRORS_PER_RUN:
-                    errors.append(message)
-                executions.append(ModuleExecution(module_id, "error", error=message))
-                if self.stop_on_error:
-                    break
-
-        return ModuleRun(tuple(executions), store.findings, store.observations, tuple(all_follow_ups), store, tuple(errors[:MAX_ERRORS_PER_RUN]))
-
+                message=f"{module_id}: {type(exc).__name__}: {exc}"; errors.append(message); executions.append(ModuleExecution(module_id,"error",error=message))
+                if self.stop_on_error: break
+        return ModuleRun(tuple(executions),store.findings,store.observations,tuple(all_follow_ups),store,tuple(errors[:MAX_ERRORS_PER_RUN]))
 
 def _cross_layer_handler(context: ModuleContext) -> ModuleResult:
-    if context.graph is None:
-        return ModuleResult()
-    analysis = analyze_cross_layer(context.graph, context.store())
-    module_id = str(context.metadata.get("module_id", ""))
-    selected = tuple(item for item in analysis.follow_ups if item["module_id"] == module_id)
-    observations = tuple(
-        SecurityObservation(
-            id=f"{module_id}:{item['correlation_id']}", kind=f"cross_layer.{item['correlation_type']}", source=module_id,
-            description=item["reason"], asset_ids=tuple(item["asset_ids"]),
-            data={"correlation_id": item["correlation_id"], "priority": item["priority"]}, confidence=float(item["priority"]),
-        ) for item in selected[:MAX_RESULT_ITEMS_PER_MODULE]
-    )
-    follow_ups = analysis.follow_ups[:MAX_FOLLOW_UPS_PER_RUN] if module_id == "cross_layer.attack_path" else ()
-    return ModuleResult(observations=observations, follow_ups=follow_ups)
+    if context.graph is None: return ModuleResult()
+    analysis=analyze_cross_layer(context.graph,context.store()); module_id=str(context.metadata.get("module_id","")); selected=tuple(item for item in analysis.follow_ups if item["module_id"]==module_id)
+    observations=tuple(SecurityObservation(id=f"{module_id}:{item['correlation_id']}",kind=f"cross_layer.{item['correlation_type']}",source=module_id,description=item["reason"],asset_ids=tuple(item["asset_ids"]),data={"correlation_id":item["correlation_id"],"priority":item["priority"]},confidence=float(item["priority"])) for item in selected[:MAX_RESULT_ITEMS_PER_MODULE])
+    follow_ups=analysis.follow_ups[:MAX_FOLLOW_UPS_PER_RUN] if module_id=="cross_layer.attack_path" else ()
+    return ModuleResult(observations=observations,follow_ups=follow_ups)
 
-
-def _validate_stage_order(module_ids: tuple[str, ...]) -> None:
-    catalog = module_index()
-    order = {ModuleStage.WEB_AI: 0, ModuleStage.FOLLOW_UP: 1, ModuleStage.SUPPLEMENTAL: 2}
-    last_stage = -1
+def _validate_stage_order(module_ids: tuple[str,...]) -> None:
+    catalog=module_index(); order={ModuleStage.WEB_AI:0,ModuleStage.FOLLOW_UP:1,ModuleStage.SUPPLEMENTAL:2}; last_stage=-1
     for module_id in module_ids:
-        spec = catalog.get(module_id)
-        if spec is None:
-            continue
-        stage = order[spec.stage]
-        if stage < last_stage:
-            raise ValueError("module plan violates execution-stage ordering")
-        last_stage = stage
-
+        spec=catalog.get(module_id)
+        if spec is None: continue
+        stage=order[spec.stage]
+        if stage<last_stage: raise ValueError("module plan violates execution-stage ordering")
+        last_stage=stage
 
 def _normalize_result(value: ModuleResult | Iterable[SecurityObservation | Finding], module_id: str) -> ModuleResult:
-    if isinstance(value, ModuleResult):
-        return value
-    if isinstance(value, (str, bytes, bytearray)):
-        raise TypeError(f"module {module_id} returned a non-structured result")
-    observations: list[SecurityObservation] = []
-    findings: list[Finding] = []
+    if isinstance(value,ModuleResult): return value
+    if isinstance(value,(str,bytes,bytearray)): raise TypeError(f"module {module_id} returned a non-structured result")
+    observations=[]; findings=[]
     for item in value:
-        if isinstance(item, SecurityObservation):
-            observations.append(item)
-        elif isinstance(item, Finding):
-            findings.append(item)
-        else:
-            raise TypeError(f"module {module_id} returned unsupported result: {type(item).__name__}")
-    return ModuleResult(tuple(observations), tuple(findings))
-
+        if isinstance(item,SecurityObservation): observations.append(item)
+        elif isinstance(item,Finding): findings.append(item)
+        else: raise TypeError(f"module {module_id} returned unsupported result: {type(item).__name__}")
+    return ModuleResult(tuple(observations),tuple(findings))
 
 def executable_module_ids(registry: ModuleRegistry | None = None) -> frozenset[str]:
     return registry.ids() if registry is not None else frozenset()
