@@ -127,7 +127,7 @@ def default_module_registry() -> ModuleRegistry:
     from access_control_module import run_web_access_control
     from web_analysis_modules import run_web_client_javascript, run_web_graphql, run_web_jwt
     from template_module import run_web_ssti
-    from protocol_modules import run_web_cache, run_web_host_header
+    from protocol_modules import run_web_cache, run_web_host_header, run_web_request_smuggling
     from coverage_modules import run_web_file_upload, run_web_path_traversal, run_web_websocket
     from nosql_module import run_web_nosql
     from ai_security_modules import run_ai_prompt_injection, run_ai_system_prompt
@@ -167,6 +167,7 @@ def default_module_registry() -> ModuleRegistry:
     registry.register("web.ssti", run_web_ssti)
     registry.register("web.cache", run_web_cache)
     registry.register("web.host_header", run_web_host_header)
+    registry.register("web.request_smuggling", run_web_request_smuggling)
     registry.register("web.path_traversal", run_web_path_traversal)
     registry.register("web.file_upload", run_web_file_upload)
     registry.register("web.websocket", run_web_websocket)
@@ -269,8 +270,7 @@ class ModuleRunner:
                     raise RuntimeError("module follow-up limit exceeded")
                 all_follow_ups.extend(result.follow_ups)
                 executions.append(ModuleExecution(
-                    module_id,
-                    "completed",
+                    module_id, "completed",
                     sum(item.id not in before_observations for item in result.observations),
                     sum(item.id not in before_findings for item in result.findings),
                     len(result.follow_ups),
