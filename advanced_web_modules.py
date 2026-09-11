@@ -69,7 +69,7 @@ def _query_variants(url: str, param: str, value: str) -> str:
     parsed = urlsplit(url)
     pairs = parse_qsl(parsed.query, keep_blank_values=True)
     changed = [(name, value if name == param else current) for name, current in pairs]
-    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", parsed.fragment and "" or "", urlencode(changed), ""))
+    return urlunsplit((parsed.scheme, parsed.netloc, parsed.path or "/", urlencode(changed), ""))
 
 
 def _params(url: str) -> tuple[str, ...]:
@@ -83,7 +83,6 @@ def run_web_xss(context):
     requests = _requests(context)
     observations: list[SecurityObservation] = []
     findings: list[Finding] = []
-    marker_base = "PHOBOSXSS"
     payload = '\"><phobos-xss>PHOBOSXSS</phobos-xss>'
     safe_marker = "PHOBOSXSS"
 
