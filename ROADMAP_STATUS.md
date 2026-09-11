@@ -24,7 +24,6 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Dynamic browser DOM discovery
 - [x] Browser network observations
 - [x] Cross-application candidate discovery
-- [x] WebSocket endpoint discovery
 
 ## Phase 3 — AI Discovery
 
@@ -44,7 +43,10 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Configurable indirect prompt-injection procedure
 - [x] Configurable direct prompt-injection canary
 - [x] Configurable system-prompt marker disclosure test
-- [x] Configurable protected-data marker disclosure test
+- [x] Configurable protected-data disclosure test
+- [x] Configurable AI output-handling probe
+- [x] Configurable goal-hijacking marker test
+- [x] Configurable context-manipulation marker test
 - [x] Browser-backed execution adapter
 
 ## Phase 5 — Indirect Injection Tracking
@@ -88,7 +90,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] API baseline analysis
 - [x] Reflected XSS signal detection
 - [x] Error-based SQL injection signal detection
-- [x] Bounded NoSQL differential signal detection
+- [x] Bounded NoSQL operator differential testing
 - [x] Passive CSRF protection analysis
 - [x] Client-side JavaScript source/sink analysis
 - [x] JWT-like token analysis with token redaction
@@ -98,9 +100,9 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Cache-policy / untrusted-reflection analysis
 - [x] Configured authentication workflow bootstrap
 - [x] Configured low/high-privilege authorization comparison
-- [x] Harmless path-traversal marker probe
-- [x] Passive file-upload surface assessment
-- [x] WebSocket endpoint discovery
+- [x] Bounded path-traversal marker checks
+- [x] Passive file-upload validation analysis
+- [x] WebSocket endpoint discovery without active message exchange
 
 ### Remaining major procedures
 
@@ -110,14 +112,12 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] Unsafe deserialization
 - [ ] Cache poisoning/deception confirmation
 - [ ] HTTP request smuggling
-- [ ] JWT signing/claim validation beyond passive header analysis
+- [ ] JWT signing/claim validation beyond passive analysis
 - [ ] GraphQL authorization/query abuse testing
-- [ ] Full WebSocket protocol/authentication testing
+- [ ] Active WebSocket authentication/authorization/message testing
 - [ ] Race-condition testing
 - [ ] Business-logic workflow abuse
 - [ ] Full authorization/IDOR object-level testing beyond configured response comparison
-- [ ] Strong path-traversal confirmation beyond marker-based signal
-- [ ] Active file-upload processing/execution validation
 
 ## AI Security Procedures
 
@@ -126,11 +126,13 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Direct prompt-injection canary procedure
 - [x] Indirect prompt-injection procedure
 - [x] System-prompt marker disclosure procedure
-- [x] Configured protected-data marker disclosure procedure
+- [x] Protected-data disclosure marker procedure
+- [x] AI output-handling render probe
+- [x] Goal-hijacking marker procedure
+- [x] Context-manipulation marker procedure
 
 ### Remaining major procedures
 
-- [ ] Unsafe AI output handling
 - [ ] Tool-abuse testing
 - [ ] Excessive-agency testing
 - [ ] RAG security testing
@@ -138,8 +140,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] AI data poisoning
 - [ ] Resource/cost abuse testing
 - [ ] Multi-agent trust-boundary testing
-- [ ] Goal hijacking
-- [ ] Memory/context manipulation
+- [ ] Full sensitive-information disclosure testing beyond configured markers
 
 ## Productization
 
