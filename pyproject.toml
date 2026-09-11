@@ -46,7 +46,6 @@ py-modules = [
     "desktop_launcher",
     "evidence",
     "graph",
-    "graphql_auth_module",
     "integration_modules",
     "knowledge_store",
     "models",
