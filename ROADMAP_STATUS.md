@@ -106,6 +106,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [x] Passive file-upload validation analysis
 - [x] WebSocket endpoint discovery without active message exchange
 - [x] WebSocket authentication-signal inventory
+- [x] Configured low/high-privilege WebSocket handshake authorization comparison without application messages
 - [x] SSRF sink discovery
 - [x] Command-execution sink discovery
 - [x] XML-processing surface discovery
@@ -121,7 +122,7 @@ This document records the implementation state of the product roadmap on the `fl
 - [ ] HTTP request smuggling confirmation
 - [ ] JWT signing/claim validation beyond passive analysis
 - [ ] Broader GraphQL query authorization/abuse testing beyond configured read-only role comparison
-- [ ] Active WebSocket authentication/authorization/message testing
+- [ ] Active WebSocket message-level authentication/authorization testing
 - [ ] Race-condition testing
 - [ ] Business-logic workflow abuse
 - [ ] Full authorization/IDOR object-level testing beyond explicitly configured object-pair comparison
