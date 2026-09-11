@@ -25,6 +25,7 @@ py-modules = [
     "access_control_module",
     "advanced_web_modules",
     "ai",
+    "ai_security_modules",
     "ai_setup",
     "ai_surface",
     "ai_testing",
