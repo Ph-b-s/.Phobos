@@ -7,7 +7,7 @@ and request controls.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Mapping, Sequence
 from urllib.parse import urlparse
 
 from browser_adapter import BrowserAdapterError, BrowserPageSnapshot, BrowserSession
@@ -15,6 +15,8 @@ from browser_adapter import BrowserAdapterError, BrowserPageSnapshot, BrowserSes
 MAX_TEXT_MATCHES = 100
 MAX_SELECTOR_LENGTH = 500
 MAX_VALUE_LENGTH = 4_000
+MAX_WEBSOCKET_PROTOCOLS = 8
+MAX_WEBSOCKET_HEADER_VALUE = 8_000
 
 
 class BrowserInteractionError(RuntimeError):
@@ -74,6 +76,14 @@ class BrowserInteractor:
         return {"url": snapshot.url, "title": snapshot.title, "text": snapshot.text,
                 "links": list(snapshot.links), "forms": list(snapshot.forms),
                 "scripts": list(snapshot.scripts), "storage_keys": list(snapshot.storage_keys)}
+
+    def websocket_handshake(self, url: str, *, headers: Mapping[str, str] | None = None, protocols: Sequence[str] = ()) -> dict[str, Any]:
+        """Perform one handshake-only WebSocket connection through the adapter."""
+        try:
+            result = self.session.websocket_handshake(url, headers=headers, protocols=protocols)
+        except (BrowserAdapterError, ValueError, TypeError) as exc:
+            raise BrowserInteractionError(f"WebSocket handshake failed: {exc}") from exc
+        return dict(result)
 
     def find_text(self, needles: Iterable[str]) -> tuple[str, ...]:
         text = self.session.text()
