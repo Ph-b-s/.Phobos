@@ -8,7 +8,22 @@ $python = Join-Path $venv "Scripts\python.exe"
 
 if (-not (Test-Path $python)) {
     Write-Host "Creating Phobos desktop environment..."
-    py -3.11 -m venv $venv
+
+    $hostPython = Get-Command python -ErrorAction SilentlyContinue
+    if (-not $hostPython) {
+        throw "Python was not found. Install Python 3.11 or newer and make sure 'python' is available in PATH."
+    }
+
+    $version = & $hostPython.Source -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+    $versionParts = $version.Trim().Split('.')
+    $major = [int]$versionParts[0]
+    $minor = [int]$versionParts[1]
+
+    if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 11)) {
+        throw "Phobos requires Python 3.11 or newer. Detected Python $version."
+    }
+
+    & $hostPython.Source -m venv $venv
 }
 
 Write-Host "Installing desktop dependencies..."
